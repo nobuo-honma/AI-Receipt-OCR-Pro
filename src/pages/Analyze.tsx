@@ -241,7 +241,7 @@ export default function Analyze() {
     };
 
     // QRコードのURL (現在のサイトのURL + /mobile)
-    const mobileUrl = window.location.origin + "/mobile";
+    const mobileUrl = `${window.location.origin}${import.meta.env.BASE_URL}#/mobile`;
 
     // ── 5. UIの描画 ──
     return (

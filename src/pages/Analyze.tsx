@@ -186,9 +186,28 @@ export default function Analyze() {
             if (error) throw new Error(error.message);
             if (!data?.text) throw new Error("テキストが読み取れませんでした");
 
-            const items = parseReceiptText(data.text);
-            if (items.length === 0) alert("商品が読み取れませんでした。別の画像を試してください。");
-            else setResults(items);
+            const newItems = parseReceiptText(data.text);
+            if (newItems.length === 0) {
+                alert("商品が読み取れませんでした。別の画像を試してください。");
+            } else {
+                // 💡 既存のリスト(results)と新しく読み取ったリスト(newItems)を合算する
+                const combined = [...results, ...newItems];
+
+                // 同じ名前・金額の商品をまとめる（再集計）
+                const aggregated: Record<string, ParsedItem> = {};
+                combined.forEach(item => {
+                    const key = `${item.name}_${item.price}`;
+                    if (aggregated[key]) {
+                        aggregated[key].qty += item.qty; // 個数を足し算
+                    } else {
+                        aggregated[key] = { ...item };
+                    }
+                });
+
+                setResults(Object.values(aggregated));
+                setSavedSessionId(null); // 追加されたので保存状態はリセット
+                alert("リストに追加しました！続けて次のレシートを読み込めます。");
+            }
         } catch (error) {
             console.error(error);
             alert("解析に失敗しました。APIキーや通信状況を確認してください。");
@@ -313,7 +332,29 @@ export default function Analyze() {
 
             {/* ── 右カラム：解析結果 ── */}
             <div className="w-full md:w-7/12">
-                <h2 className="text-2xl font-bold text-bakery-textMain mb-6 flex items-center gap-2">📝 解析・集計結果</h2>
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold text-bakery-textMain flex items-center gap-2">
+                        📝 解析・集計結果
+                    </h2>
+
+                    {/* 💡 追加：リストをクリアするボタン */}
+                    {results.length > 0 && (
+                        <button
+                            onClick={() => {
+                                if (window.confirm("リストをすべてクリアして最初からやり直しますか？")) {
+                                    setResults([]);
+                                    setSavedSessionId(null);
+                                    setImagePreview(null);
+                                    setImageFile(null);
+                                }
+                            }}
+                            className="text-sm text-bakery-danger border border-bakery-danger/30 bg-red-50 px-4 py-1.5 rounded hover:bg-red-100 transition-colors font-bold shadow-sm"
+                        >
+                            🗑️ クリア
+                        </button>
+                    )}
+                </div>
+
                 {results.length > 0 ? (
                     <div className="animate-fade-in-up">
                         <div className="bg-linear-to-br from-[#3D2B1F] to-[#6B4226] p-6 rounded-xl text-center shadow-lg mb-6 border border-[#4A2E1A]">

@@ -17,15 +17,20 @@ export default function MobileCamera() {
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
 
-                // 映像のメタデータが読み込まれるのを待ってから再生
-                videoRef.current.onloadedmetadata = async () => {
-                    try {
-                        await videoRef.current?.play();
-                        setIsCameraActive(true);
-                    } catch (playErr) {
-                        console.error("再生エラー:", playErr);
-                    }
-                };
+                // 👇 ここから変更：iOSのSafariでも確実に再生させるためのハック
+                videoRef.current.setAttribute('playsinline', 'true'); // 大事
+                videoRef.current.setAttribute('autoplay', 'true');
+                videoRef.current.setAttribute('muted', 'true');
+
+                try {
+                    await videoRef.current.play();
+                    setIsCameraActive(true);
+                } catch (playErr) {
+                    console.error("再生エラー:", playErr);
+                    // play()がブロックされた場合はユーザーのアクションを待たずに強制表示
+                    setIsCameraActive(true);
+                }
+                // 👆 ここまで変更
             }
         } catch (err) {
             alert("カメラへのアクセスを許可してください。");

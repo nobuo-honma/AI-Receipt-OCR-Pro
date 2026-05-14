@@ -1,0 +1,8 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+@layer base {
+  body {
+    @apply font-zen text-bakery-textMain bg-bakery-bg bg-pattern antialiased;
+  }
+}

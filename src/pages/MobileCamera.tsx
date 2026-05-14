@@ -1,81 +1,95 @@
 // src/pages/MobileCamera.tsx
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
 export default function MobileCamera() {
     const [isCameraActive, setIsCameraActive] = useState(false);
     const [isSending, setIsSending] = useState(false);
+
+    // 💡 修正ポイント：映像データを「再読み込みの引き金にならない安全な場所（useRef）」に保存する
+    const streamRef = useRef<MediaStream | null>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
+    // 1. カメラの許可を取り、ストリームを保存して画面を切り替える
     const startCamera = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode: 'environment' }
             });
-
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-
-                // 👇 ここから変更：iOSのSafariでも確実に再生させるためのハック
-                videoRef.current.setAttribute('playsinline', 'true'); // 大事
-                videoRef.current.setAttribute('autoplay', 'true');
-                videoRef.current.setAttribute('muted', 'true');
-
-                try {
-                    await videoRef.current.play();
-                    setIsCameraActive(true);
-                } catch (playErr) {
-                    console.error("再生エラー:", playErr);
-                    // play()がブロックされた場合はユーザーのアクションを待たずに強制表示
-                    setIsCameraActive(true);
-                }
-                // 👆 ここまで変更
+            streamRef.current = stream; // 安全な場所に映像を保存
+            setIsCameraActive(true);    // カメラ画面を表示！
+        } catch (err: any) {
+            console.error(err);
+            if (err.name === 'NotAllowedError') {
+                alert("カメラの許可が拒否されました。スマホの設定から許可してください。");
+            } else {
+                alert("カメラの起動に失敗しました。");
             }
-        } catch (err) {
-            alert("カメラへのアクセスを許可してください。");
         }
     };
 
-    const stopCamera = useCallback(() => {
-        if (videoRef.current && videoRef.current.srcObject) {
-            const stream = videoRef.current.srcObject as MediaStream;
-            stream.getTracks().forEach(track => track.stop());
+    // 2. 画面が切り替わったら、安全な場所から映像を取り出して流し込む
+    useEffect(() => {
+        if (isCameraActive && streamRef.current && videoRef.current) {
+            videoRef.current.srcObject = streamRef.current;
+
+            // iOS等で確実に再生させるための魔法の属性
+            videoRef.current.setAttribute('playsinline', 'true');
+            videoRef.current.setAttribute('autoplay', 'true');
+            videoRef.current.setAttribute('muted', 'true');
+
+            videoRef.current.play().catch(e => console.error("再生エラー:", e));
+        }
+    }, [isCameraActive]); // 👈 監視対象をシンプルにしたのでループが起きません
+
+    // 3. カメラの停止処理
+    const stopCamera = () => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        }
+        if (videoRef.current) {
             videoRef.current.srcObject = null;
         }
         setIsCameraActive(false);
+    };
+
+    // 画面を完全に閉じる時だけカメラをオフにする
+    useEffect(() => {
+        return () => {
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop());
+            }
+        };
     }, []);
 
+    // 4. 撮影と送信
     const captureAndSend = () => {
         if (!videoRef.current || !canvasRef.current) return;
 
         const video = videoRef.current;
         const canvas = canvasRef.current;
 
-        // ビデオの実際の解像度をキャンバスに反映
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // 現在のフレームを描画
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        // JPEG圧縮（画質0.8）でBlob化
         canvas.toBlob(async (blob) => {
             if (!blob) return;
             setIsSending(true);
 
-            // 撮影直後にカメラを止めてリソースを解放
-            stopCamera();
+            stopCamera(); // 撮影完了と同時にカメラを止める
 
             const reader = new FileReader();
             reader.readAsDataURL(blob);
             reader.onloadend = async () => {
                 const base64String = (reader.result as string).split(',')[1];
 
-                // Supabase の transfer_images テーブルへ保存
                 const { error } = await supabase
                     .from('transfer_images')
                     .insert({ image_base64: base64String });
@@ -96,8 +110,8 @@ export default function MobileCamera() {
             <h1 className="text-2xl font-bold text-bakery-textMain mb-6">📱 レシート送信カメラ</h1>
 
             {!isCameraActive ? (
-                <div className="text-center">
-                    <p className="text-bakery-textSub mb-6">
+                <div className="text-center animate-fade-in-up">
+                    <p className="text-bakery-textMain mb-6">
                         カメラでレシートを撮影して、<br />
                         直接PCへ送信できます。
                     </p>
@@ -109,8 +123,7 @@ export default function MobileCamera() {
                     </button>
                 </div>
             ) : (
-                <div className="relative w-full max-w-sm">
-                    {/* iOS/Androidで自動再生させるために必要な属性を網羅 */}
+                <div className="relative w-full max-w-sm animate-fade-in-up">
                     <video
                         ref={videoRef}
                         className="w-full rounded-xl bg-black shadow-2xl"
@@ -123,7 +136,7 @@ export default function MobileCamera() {
                     <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-4">
                         <button
                             onClick={stopCamera}
-                            className="bg-white/90 text-black px-4 py-3 rounded-full font-bold shadow-md active:bg-gray-200"
+                            className="bg-white/90 text-bakery-textMain px-4 py-3 rounded-full font-bold shadow-md active:bg-gray-200"
                         >
                             キャンセル
                         </button>

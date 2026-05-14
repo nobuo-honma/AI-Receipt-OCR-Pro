@@ -66,7 +66,7 @@ export default function Dashboard() {
                                 <BarChart data={ranking} layout="vertical" margin={{ left: 40, right: 20 }}>
                                     <XAxis type="number" hide />
                                     <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F', fontSize: 12 }} />
-                                    <Tooltip formatter={(val: number) => [`￥${val.toLocaleString()}`, "売上"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} />
+                                    <Tooltip formatter={(val: any) => [`￥${Number(val).toLocaleString()}`, "売上"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} />
                                     <Bar dataKey="totalSales" radius={[0, 4, 4, 0]}>
                                         {ranking.map((_, i) => <Cell key={i} fill="#8B5E3C" />)}
                                     </Bar>
@@ -82,7 +82,7 @@ export default function Dashboard() {
                                 <BarChart data={[...ranking].sort((a, b) => b.totalQty - a.totalQty)} layout="vertical" margin={{ left: 40, right: 20 }}>
                                     <XAxis type="number" hide />
                                     <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F', fontSize: 12 }} />
-                                    <Tooltip formatter={(val: number) => [`${val.toLocaleString()} 個`, "個数"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} />
+                                    <Tooltip formatter={(val: any) => [`${Number(val).toLocaleString()} 個`, "個数"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} />
                                     <Bar dataKey="totalQty" radius={[0, 4, 4, 0]}>
                                         {ranking.map((_, i) => <Cell key={i} fill="#D4A96A" />)}
                                     </Bar>

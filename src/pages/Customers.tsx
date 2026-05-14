@@ -4,18 +4,7 @@ import { supabase } from '../lib/supabase';
 
 // 型定義
 type Customer = { id: number; name: string; phone: string; email: string; points: number; total_spent: number; visit_count: number; last_visit: string; };
-type Reservation = {
-    id: number;
-    customer_id: number | null; // nullを許容
-    guest_name: string;        // 追加
-    guest_phone: string;       // 追加
-    reservation_date: string;
-    reservation_time: string;
-    order_details: string;
-    status: string;
-    memo: string;
-    customers: { name: string; phone: string } | null // nullを許容
-};
+type Reservation = { id: number; customer_id: number; guest_name: string; guest_phone: string; reservation_date: string; reservation_time: string; order_details: string; status: string; memo: string; customers: { name: string; phone: string } };
 
 export default function Customers() {
     const [activeTab, setActiveTab] = useState<'list' | 'reservation'>('list');
@@ -32,11 +21,11 @@ export default function Customers() {
     // 予約注文モーダル用
     const [showResModal, setShowResModal] = useState(false);
     const [resCustomerId, setResCustomerId] = useState('');
-    const [resGuestName, setResGuestName] = useState(''); // ← 追加
-    const [resGuestPhone, setResGuestPhone] = useState(''); // ← 追加
+    const [resGuestName, setResGuestName] = useState('');     // ← ⭐️追加: ゲスト用
+    const [resGuestPhone, setResGuestPhone] = useState('');   // ← ⭐️追加: ゲスト用
     const [resDate, setResDate] = useState('');
     const [resTime, setResTime] = useState('');
-    const [resOrderDetails, setResOrderDetails] = useState(''); // ← 注文内容
+    const [resOrderDetails, setResOrderDetails] = useState('');
     const [resMemo, setResMemo] = useState('');
 
     const [isSaving, setIsSaving] = useState(false);
@@ -47,7 +36,6 @@ export default function Customers() {
         const { data: cData } = await supabase.from('customers').select('*').order('last_visit', { ascending: false });
         if (cData) setCustomers(cData);
 
-        // 予約の取得（未来の予約を近い順に表示）
         const { data: rData } = await supabase
             .from('reservations')
             .select('*, customers(name, phone)')
@@ -65,7 +53,7 @@ export default function Customers() {
         e.preventDefault();
         if (!newName.trim()) return alert("氏名は必須です！");
         setIsSaving(true);
-        const { error } = await supabase.from('customers').insert({ name: newName, phone: newPhone, created_at: new Date().toISOString() });
+        const { error } = await supabase.from('customers').insert({ name: newName.normalize("NFKC"), phone: newPhone, created_at: new Date().toISOString() });
         setIsSaving(false);
         if (!error) {
             alert("登録しました！");
@@ -80,22 +68,23 @@ export default function Customers() {
         fetchData();
     };
 
-    // ── 予約注文登録・ステータス変更 ──
+    // ── ⭐️ 予約注文登録 ──
     const handleAddReservation = async (e: React.FormEvent) => {
         e.preventDefault();
-        // 顧客IDが選択されていない場合は「新規（ゲスト）名」が必須
+
+        // 顧客IDが選択されていない場合は「ゲスト名」が必須
         if (!resCustomerId && !resGuestName.trim()) return alert("お客様を選択するか、お名前を直接入力してください");
         if (!resDate || !resTime || !resOrderDetails) return alert("必須項目を入力してください");
+
         setIsSaving(true);
 
         const { error } = await supabase.from('reservations').insert({
-            // IDがあればIDを、無ければ null を入れる
             customer_id: resCustomerId ? Number(resCustomerId) : null,
-            guest_name: resCustomerId ? '' : resGuestName, // IDがない時だけゲスト名を保存
-            guest_phone: resCustomerId ? '' : resGuestPhone, // IDがない時だけ電話番号を保存
+            guest_name: resCustomerId ? '' : resGuestName.normalize("NFKC"),
+            guest_phone: resCustomerId ? '' : resGuestPhone,
             reservation_date: resDate,
             reservation_time: resTime,
-            order_details: resOrderDetails,
+            order_details: resOrderDetails.normalize("NFKC"),
             memo: resMemo,
             status: '未受渡'
         });
@@ -206,29 +195,18 @@ export default function Customers() {
                                                             <span className="font-bold text-bakery-primary">{res.reservation_date}</span><br />
                                                             <span className="text-sm text-[#8B6340]">{res.reservation_time}</span>
                                                         </td>
+                                                        {/* ⭐️ 表示部分も対応 */}
                                                         <td className="p-4 font-bold text-bakery-textMain">
-                                                            {/* 会員データがあれば名前を、なければゲスト名を直接表示 */}
                                                             {res.customer_id ? res.customers?.name : res.guest_name}
-
-                                                            {!res.customer_id && (
-                                                                <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full ml-2">ゲスト</span>
-                                                            )}
-
+                                                            {!res.customer_id && <span className="text-[10px] text-bakery-primary ml-2 bg-bakery-surface px-1.5 py-0.5 rounded border border-bakery-border">非会員</span>}
                                                             <br />
                                                             <span className="text-xs text-gray-500 font-normal">
                                                                 📞 {res.customer_id ? (res.customers?.phone || '未登録') : (res.guest_phone || '未登録')}
                                                             </span>
                                                         </td>
                                                         <td className="p-4">
-                                                            {/* 注文内容（改行を反映させる） */}
-                                                            <div className="text-sm font-bold text-bakery-textMain whitespace-pre-wrap">
-                                                                {res.order_details}
-                                                            </div>
-                                                            {res.memo && (
-                                                                <p className="text-xs text-gray-500 mt-2 bg-gray-50 p-2 rounded">
-                                                                    💡 備考: {res.memo}
-                                                                </p>
-                                                            )}
+                                                            <div className="text-sm font-bold text-bakery-textMain whitespace-pre-wrap">{res.order_details}</div>
+                                                            {res.memo && <p className="text-xs text-gray-500 mt-2 bg-gray-50 p-2 rounded">💡 備考: {res.memo}</p>}
                                                         </td>
                                                         <td className="p-4 text-center">
                                                             {isDone ? (
@@ -254,7 +232,7 @@ export default function Customers() {
                 </>
             )}
 
-            {/* ── 予約注文登録モーダル ── */}
+            {/* ── ⭐️ 予約注文登録モーダル ── */}
             {showResModal && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
                     <div className="bg-bakery-bg p-8 rounded-xl shadow-2xl w-full max-w-lg relative border-2 border-bakery-border animate-fade-in-up">
@@ -262,13 +240,23 @@ export default function Customers() {
                         <h2 className="text-2xl font-bold text-bakery-textMain mb-6">🥐 予約注文の登録</h2>
 
                         <form onSubmit={handleAddReservation} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-[#8B6340] mb-1">お客様 <span className="text-red-500">*</span></label>
-                                <select required value={resCustomerId} onChange={e => setResCustomerId(e.target.value)} className="w-full p-3 border border-bakery-border rounded bg-white focus:outline-none focus:ring-2 focus:ring-bakery-gold">
-                                    <option value="">-- 顧客を選択 --</option>
+
+                            <div className="bg-bakery-surface p-4 rounded-lg border border-bakery-border">
+                                <label className="block text-sm font-bold text-[#8B6340] mb-2">お客様の選択・入力 <span className="text-red-500">*</span></label>
+
+                                <select value={resCustomerId} onChange={e => { setResCustomerId(e.target.value); setResGuestName(''); setResGuestPhone(''); }} className="w-full p-3 border border-bakery-border rounded bg-white focus:outline-none focus:ring-2 focus:ring-bakery-gold mb-3">
+                                    <option value="">-- 会員から選択（または下に入力） --</option>
                                     {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </select>
+
+                                {!resCustomerId && (
+                                    <div className="flex gap-2 animate-fade-in-up">
+                                        <input type="text" placeholder="お名前 (例: 佐藤)" value={resGuestName} onChange={e => setResGuestName(e.target.value)} className="flex-1 p-3 border border-bakery-border rounded bg-white focus:outline-none focus:ring-2 focus:ring-bakery-gold" />
+                                        <input type="text" placeholder="電話番号" value={resGuestPhone} onChange={e => setResGuestPhone(e.target.value)} className="flex-1 p-3 border border-bakery-border rounded bg-white focus:outline-none focus:ring-2 focus:ring-bakery-gold" />
+                                    </div>
+                                )}
                             </div>
+
                             <div className="flex gap-4">
                                 <div className="flex-1">
                                     <label className="block text-sm font-bold text-[#8B6340] mb-1">受渡日 <span className="text-red-500">*</span></label>
@@ -279,17 +267,12 @@ export default function Customers() {
                                     <input required type="time" value={resTime} onChange={e => setResTime(e.target.value)} className="w-full p-3 border border-bakery-border rounded bg-white" />
                                 </div>
                             </div>
+
                             <div>
                                 <label className="block text-sm font-bold text-[#8B6340] mb-1">注文内容（商品と個数） <span className="text-red-500">*</span></label>
-                                <textarea
-                                    required
-                                    rows={4}
-                                    placeholder="例：&#13;&#10;食パン 1斤&#13;&#10;チョコクロワッサン 2個&#13;&#10;ブレンドコーヒー 1杯"
-                                    value={resOrderDetails}
-                                    onChange={e => setResOrderDetails(e.target.value)}
-                                    className="w-full p-3 border border-bakery-border rounded bg-white focus:outline-none focus:ring-2 focus:ring-bakery-gold"
-                                />
+                                <textarea required rows={3} placeholder="例：&#13;&#10;食パン 1斤&#13;&#10;クロワッサン 2個" value={resOrderDetails} onChange={e => setResOrderDetails(e.target.value)} className="w-full p-3 border border-bakery-border rounded bg-white focus:outline-none focus:ring-2 focus:ring-bakery-gold" />
                             </div>
+
                             <div>
                                 <label className="block text-sm font-bold text-[#8B6340] mb-1">備考・メモ（任意）</label>
                                 <input type="text" placeholder="紙袋が必要、ギフト包装など" value={resMemo} onChange={e => setResMemo(e.target.value)} className="w-full p-3 border border-bakery-border rounded bg-white" />

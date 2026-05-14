@@ -161,7 +161,8 @@ export default function Analyze() {
             } else {
                 const match = currentLine.match(/^(.*?)\s+(\d+)$/);
                 if (match) {
-                    const name = match[1].trim();
+                    const name = match[1].trim().normalize("NFKC");
+
                     const price = parseInt(match[2], 10);
                     if (name.length >= 2 && price >= 10 && price <= 100000) parsedItems.push({ name, price, qty: 1 });
                 }

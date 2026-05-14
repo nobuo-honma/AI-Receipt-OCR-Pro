@@ -4,7 +4,18 @@ import { supabase } from '../lib/supabase';
 
 // 型定義
 type Customer = { id: number; name: string; phone: string; email: string; points: number; total_spent: number; visit_count: number; last_visit: string; };
-type Reservation = { id: number; customer_id: number; reservation_date: string; reservation_time: string; order_details: string; status: string; memo: string; customers: { name: string; phone: string } };
+type Reservation = {
+    id: number;
+    customer_id: number | null; // nullを許容
+    guest_name: string;        // 追加
+    guest_phone: string;       // 追加
+    reservation_date: string;
+    reservation_time: string;
+    order_details: string;
+    status: string;
+    memo: string;
+    customers: { name: string; phone: string } | null // nullを許容
+};
 
 export default function Customers() {
     const [activeTab, setActiveTab] = useState<'list' | 'reservation'>('list');
@@ -21,6 +32,8 @@ export default function Customers() {
     // 予約注文モーダル用
     const [showResModal, setShowResModal] = useState(false);
     const [resCustomerId, setResCustomerId] = useState('');
+    const [resGuestName, setResGuestName] = useState(''); // ← 追加
+    const [resGuestPhone, setResGuestPhone] = useState(''); // ← 追加
     const [resDate, setResDate] = useState('');
     const [resTime, setResTime] = useState('');
     const [resOrderDetails, setResOrderDetails] = useState(''); // ← 注文内容
@@ -70,22 +83,29 @@ export default function Customers() {
     // ── 予約注文登録・ステータス変更 ──
     const handleAddReservation = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!resCustomerId || !resDate || !resTime || !resOrderDetails) return alert("必須項目を入力してください");
+        // 顧客IDが選択されていない場合は「新規（ゲスト）名」が必須
+        if (!resCustomerId && !resGuestName.trim()) return alert("お客様を選択するか、お名前を直接入力してください");
+        if (!resDate || !resTime || !resOrderDetails) return alert("必須項目を入力してください");
         setIsSaving(true);
 
         const { error } = await supabase.from('reservations').insert({
-            customer_id: Number(resCustomerId),
+            // IDがあればIDを、無ければ null を入れる
+            customer_id: resCustomerId ? Number(resCustomerId) : null,
+            guest_name: resCustomerId ? '' : resGuestName, // IDがない時だけゲスト名を保存
+            guest_phone: resCustomerId ? '' : resGuestPhone, // IDがない時だけ電話番号を保存
             reservation_date: resDate,
             reservation_time: resTime,
             order_details: resOrderDetails,
             memo: resMemo,
-            status: '未受渡' // ステータスを受渡しに変更
+            status: '未受渡'
         });
 
         setIsSaving(false);
         if (!error) {
             alert("予約注文を登録しました！");
-            setShowResModal(false); setResCustomerId(''); setResDate(''); setResTime(''); setResOrderDetails(''); setResMemo('');
+            setShowResModal(false);
+            setResCustomerId(''); setResGuestName(''); setResGuestPhone('');
+            setResDate(''); setResTime(''); setResOrderDetails(''); setResMemo('');
             fetchData();
         } else {
             alert("予約の登録に失敗しました。");
@@ -187,8 +207,17 @@ export default function Customers() {
                                                             <span className="text-sm text-[#8B6340]">{res.reservation_time}</span>
                                                         </td>
                                                         <td className="p-4 font-bold text-bakery-textMain">
-                                                            {res.customers?.name}<br />
-                                                            <span className="text-xs text-gray-500 font-normal">📞 {res.customers?.phone || '未登録'}</span>
+                                                            {/* 会員データがあれば名前を、なければゲスト名を直接表示 */}
+                                                            {res.customer_id ? res.customers?.name : res.guest_name}
+
+                                                            {!res.customer_id && (
+                                                                <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full ml-2">ゲスト</span>
+                                                            )}
+
+                                                            <br />
+                                                            <span className="text-xs text-gray-500 font-normal">
+                                                                📞 {res.customer_id ? (res.customers?.phone || '未登録') : (res.guest_phone || '未登録')}
+                                                            </span>
                                                         </td>
                                                         <td className="p-4">
                                                             {/* 注文内容（改行を反映させる） */}

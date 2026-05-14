@@ -10,14 +10,30 @@ export default function MobileCamera() {
 
     const startCamera = async () => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            // まずは背面カメラを優先的にリクエスト
+            const constraints = {
+                video: {
+                    facingMode: 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
+
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
-                videoRef.current.play();
+                // iOS対策: playsInlineとあわせて明示的にplayを呼ぶ
+                await videoRef.current.play();
                 setIsCameraActive(true);
             }
-        } catch (err) {
-            alert("カメラの起動に失敗しました。");
+        } catch (err: any) {
+            console.error("Camera Error:", err);
+            // 権限拒否やカメラ不在など、エラーの種類を特定しやすくする
+            const errorMsg = err.name === 'NotAllowedError'
+                ? "カメラの使用が許可されていません。ブラウザの設定を確認してください。"
+                : `カメラの起動に失敗しました (${err.name})`;
+            alert(errorMsg);
         }
     };
 
@@ -32,34 +48,44 @@ export default function MobileCamera() {
 
     const captureAndSend = () => {
         if (!videoRef.current || !canvasRef.current) return;
+
         const video = videoRef.current;
         const canvas = canvasRef.current;
+
+        // ビデオの実際の解像度をキャンバスに反映
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
+
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
+        // 現在のフレームを描画
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        // 画像をBase64に変換してPCに送信する
+        // JPEG圧縮（画質0.8）でBlob化
         canvas.toBlob(async (blob) => {
             if (!blob) return;
             setIsSending(true);
-            stopCamera(); // 撮影したらカメラを止める
+
+            // 撮影直後にカメラを止めてリソースを解放
+            stopCamera();
 
             const reader = new FileReader();
             reader.readAsDataURL(blob);
             reader.onloadend = async () => {
                 const base64String = (reader.result as string).split(',')[1];
 
-                // Supabaseに画像を送信（PC側がこれを監視している）
-                const { error } = await supabase.from('transfer_images').insert({ image_base64: base64String });
+                // Supabase の transfer_images テーブルへ保存
+                const { error } = await supabase
+                    .from('transfer_images')
+                    .insert({ image_base64: base64String });
 
                 setIsSending(false);
                 if (error) {
-                    alert("送信に失敗しました。");
+                    console.error("Supabase Error:", error);
+                    alert("送信に失敗しました。ネットワーク状況を確認してください。");
                 } else {
-                    alert("PCに送信しました！PCの画面を確認してください。");
+                    alert("PCに送信しました！PCの解析画面を確認してください。");
                 }
             };
         }, 'image/jpeg', 0.8);
@@ -70,20 +96,43 @@ export default function MobileCamera() {
             <h1 className="text-2xl font-bold text-bakery-textMain mb-6">📱 レシート送信カメラ</h1>
 
             {!isCameraActive ? (
-                <button onClick={startCamera} className="bg-bakery-primary text-white py-4 px-10 rounded-full font-bold text-lg shadow-lg hover:scale-105 transition-transform">
-                    📷 カメラを起動する
-                </button>
+                <div className="text-center">
+                    <p className="text-bakery-textSub mb-6">
+                        カメラでレシートを撮影して、<br />
+                        直接PCへ送信できます。
+                    </p>
+                    <button
+                        onClick={startCamera}
+                        className="bg-bakery-primary text-white py-4 px-10 rounded-full font-bold text-lg shadow-lg active:scale-95 transition-transform"
+                    >
+                        📷 カメラを起動する
+                    </button>
+                </div>
             ) : (
                 <div className="relative w-full max-w-sm">
-                    <video ref={videoRef} className="w-full rounded-xl bg-black shadow-2xl" playsInline />
+                    {/* iOS/Androidで自動再生させるために必要な属性を網羅 */}
+                    <video
+                        ref={videoRef}
+                        className="w-full rounded-xl bg-black shadow-2xl"
+                        playsInline
+                        muted
+                        autoPlay
+                    />
                     <canvas ref={canvasRef} className="hidden" />
 
                     <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-4">
-                        <button onClick={stopCamera} className="bg-white/80 text-black px-4 py-3 rounded-full font-bold shadow">
+                        <button
+                            onClick={stopCamera}
+                            className="bg-white/90 text-black px-4 py-3 rounded-full font-bold shadow-md active:bg-gray-200"
+                        >
                             キャンセル
                         </button>
-                        <button onClick={captureAndSend} disabled={isSending} className="bg-bakery-danger text-white px-8 py-3 rounded-full font-bold shadow-lg flex items-center gap-2">
-                            {isSending ? "送信中..." : "📸 撮影してPCに送る"}
+                        <button
+                            onClick={captureAndSend}
+                            disabled={isSending}
+                            className="bg-bakery-danger text-white px-8 py-3 rounded-full font-bold shadow-lg flex items-center gap-2 active:scale-95 disabled:bg-gray-400"
+                        >
+                            {isSending ? "送信中..." : "📸 撮影して送信"}
                         </button>
                     </div>
                 </div>

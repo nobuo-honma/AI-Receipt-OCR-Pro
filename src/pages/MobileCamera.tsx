@@ -10,30 +10,25 @@ export default function MobileCamera() {
 
     const startCamera = async () => {
         try {
-            // まずは背面カメラを優先的にリクエスト
-            const constraints = {
-                video: {
-                    facingMode: 'environment',
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }
-            };
-
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment' }
+            });
 
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
-                // iOS対策: playsInlineとあわせて明示的にplayを呼ぶ
-                await videoRef.current.play();
-                setIsCameraActive(true);
+
+                // 映像のメタデータが読み込まれるのを待ってから再生
+                videoRef.current.onloadedmetadata = async () => {
+                    try {
+                        await videoRef.current?.play();
+                        setIsCameraActive(true);
+                    } catch (playErr) {
+                        console.error("再生エラー:", playErr);
+                    }
+                };
             }
-        } catch (err: any) {
-            console.error("Camera Error:", err);
-            // 権限拒否やカメラ不在など、エラーの種類を特定しやすくする
-            const errorMsg = err.name === 'NotAllowedError'
-                ? "カメラの使用が許可されていません。ブラウザの設定を確認してください。"
-                : `カメラの起動に失敗しました (${err.name})`;
-            alert(errorMsg);
+        } catch (err) {
+            alert("カメラへのアクセスを許可してください。");
         }
     };
 

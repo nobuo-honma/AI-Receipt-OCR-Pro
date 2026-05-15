@@ -1,4 +1,4 @@
-// 👇 BrowserRouter を HashRouter に変更
+// src/App.tsx (一部抜粋)
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Home from './pages/Home';
@@ -7,10 +7,10 @@ import Customers from './pages/Customers';
 import Master from './pages/Master';
 import Analyze from './pages/Analyze';
 import MobileCamera from './pages/MobileCamera';
+import Contact from './pages/Contact'; // ⭐️ これを追加
 
 function App() {
   return (
-    // 👇 ここも HashRouter に変更
     <HashRouter>
       <Layout>
         <Routes>
@@ -20,10 +20,10 @@ function App() {
           <Route path="/customers" element={<Customers />} />
           <Route path="/master" element={<Master />} />
           <Route path="/mobile" element={<MobileCamera />} />
+          <Route path="/contact" element={<Contact />} /> {/* ⭐️ これを追加 */}
         </Routes>
       </Layout>
     </HashRouter>
   );
 }
-
 export default App;

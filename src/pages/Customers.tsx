@@ -250,9 +250,21 @@ export default function Customers() {
                                 </select>
 
                                 {!resCustomerId && (
-                                    <div className="flex gap-2 animate-fade-in-up">
-                                        <input type="text" placeholder="お名前 (例: 佐藤)" value={resGuestName} onChange={e => setResGuestName(e.target.value)} className="flex-1 p-3 border border-bakery-border rounded bg-white focus:outline-none focus:ring-2 focus:ring-bakery-gold" />
-                                        <input type="text" placeholder="電話番号" value={resGuestPhone} onChange={e => setResGuestPhone(e.target.value)} className="flex-1 p-3 border border-bakery-border rounded bg-white focus:outline-none focus:ring-2 focus:ring-bakery-gold" />
+                                    <div className="flex flex-col sm:flex-row gap-3 animate-fade-in-up mt-3">
+                                        <input
+                                            type="text"
+                                            placeholder="お名前 (例: 佐藤)"
+                                            value={resGuestName}
+                                            onChange={e => setResGuestName(e.target.value)}
+                                            className="w-full sm:flex-1 p-3 border border-bakery-border rounded bg-white focus:outline-none focus:ring-2 focus:ring-bakery-gold"
+                                        />
+                                        <input
+                                            type="text"
+                                            placeholder="電話番号"
+                                            value={resGuestPhone}
+                                            onChange={e => setResGuestPhone(e.target.value)}
+                                            className="w-full sm:flex-1 p-3 border border-bakery-border rounded bg-white focus:outline-none focus:ring-2 focus:ring-bakery-gold"
+                                        />
                                     </div>
                                 )}
                             </div>

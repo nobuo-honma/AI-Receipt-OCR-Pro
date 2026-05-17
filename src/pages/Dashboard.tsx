@@ -37,8 +37,8 @@ export default function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                <div className="bg-white p-6 rounded-lg shadow border h-80"><ResponsiveContainer><BarChart data={ranking} layout="vertical"><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F' }} /><Tooltip formatter={(v: ValueType) => [`￥${v}`, "売上"]} /><Bar dataKey="totalSales">{ranking.map((_, i) => <Cell key={i} fill="#8B5E3C" />)}</Bar></BarChart></ResponsiveContainer></div>
-                <div className="bg-white p-6 rounded-lg shadow border h-80"><ResponsiveContainer><BarChart data={[...ranking].sort((a, b) => b.totalQty - a.totalQty)} layout="vertical"><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F' }} /><Tooltip formatter={(v: ValueType) => [`${v}個`, "個数"]} /><Bar dataKey="totalQty">{ranking.map((_, i) => <Cell key={i} fill="#D4A96A" />)}</Bar></BarChart></ResponsiveContainer></div>
+                <div className="bg-white p-6 rounded-lg shadow border h-80"><ResponsiveContainer><BarChart data={ranking} layout="vertical"><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F' }} /><Tooltip formatter={(v: ValueType | undefined) => [`￥${v ?? ''}`, "売上"]} /><Bar dataKey="totalSales">{ranking.map((_, i) => <Cell key={i} fill="#8B5E3C" />)}</Bar></BarChart></ResponsiveContainer></div>
+                <div className="bg-white p-6 rounded-lg shadow border h-80"><ResponsiveContainer><BarChart data={[...ranking].sort((a, b) => b.totalQty - a.totalQty)} layout="vertical"><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F' }} /><Tooltip formatter={(v: ValueType | undefined) => [`${v ?? ''}個`, "個数"]} /><Bar dataKey="totalQty">{ranking.map((_, i) => <Cell key={i} fill="#D4A96A" />)}</Bar></BarChart></ResponsiveContainer></div>
             </div>
         </div>
     );

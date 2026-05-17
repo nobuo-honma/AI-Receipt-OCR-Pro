@@ -1,8 +1,69 @@
-@import "tailwindcss";
-@config "../tailwind.config.js";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
+/* アプリ全体の土台（body）にベーカリー風のデザインを強制適用する */
 @layer base {
   body {
     @apply font-zen text-bakery-textMain bg-bakery-bg bg-pattern antialiased;
+    /* 背景をクリーム色にし、うっすらとした柄を重ねる */
+  }
+}
+
+/* ── 🖨️ 宛名ラベル印刷用の特殊スタイル（A4 21面 70mm x 42.3mm 対応） ── */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0 !important;
+  }
+
+  body {
+    background: white !important;
+    /* 印刷時は真っ白にする */
+    color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 210mm !important;
+    height: 297mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    padding-top: 21.2mm !important;
+    box-sizing: border-box;
+  }
+
+  .label-container {
+    display: grid !important;
+    grid-template-columns: repeat(3, 70mm) !important;
+    grid-auto-rows: 42.3mm !important;
+    gap: 0 !important;
+    align-content: start;
+    justify-content: center;
+  }
+
+  .label-card {
+    width: 70mm !important;
+    height: 42.3mm !important;
+    padding: 3mm 5mm !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    border: 0px solid #ccc !important;
+  }
+}
+
+@media screen {
+  .print-only {
+    display: none !important;
   }
 }

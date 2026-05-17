@@ -1,4 +1,3 @@
-// src/App.tsx (一部抜粋)
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Home from './pages/Home';
@@ -7,9 +6,10 @@ import Customers from './pages/Customers';
 import Master from './pages/Master';
 import Analyze from './pages/Analyze';
 import MobileCamera from './pages/MobileCamera';
-import Contact from './pages/Contact'; // ⭐️ これを追加
+import Contact from './pages/Contact';
+import Manual from './pages/Manual';
 
-function App() {
+export default function App() {
   return (
     <HashRouter>
       <Layout>
@@ -20,10 +20,10 @@ function App() {
           <Route path="/customers" element={<Customers />} />
           <Route path="/master" element={<Master />} />
           <Route path="/mobile" element={<MobileCamera />} />
-          <Route path="/contact" element={<Contact />} /> {/* ⭐️ これを追加 */}
+          <Route path="/contact" element={<Contact />} />
+          <Route path="/manual" element={<Manual />} />
         </Routes>
       </Layout>
     </HashRouter>
   );
 }
-export default App;

@@ -1,11 +1,16 @@
 import { Link } from 'react-router-dom';
+// 相対パスを「../assets/...」に修正（src/pages から1つ上の src に戻って assets を参照）
+import bakeryHero from '../assets/bakery-hero.jpg';
 
 export default function Home() {
     return (
         <div className="min-h-screen pb-10">
             {/* ヒーローセクション（写真背景 ＋ 焦げ茶色の半透明オーバーレイ） */}
             <div className="relative text-center px-10 pt-16 pb-14 shadow-lg overflow-hidden rounded-b-2xl mb-6">
-                <div className="absolute inset-0 bg-cover bg-center z-0" style={{ backgroundImage: "url('/bakery-hero.jpg')" }}></div>
+                <div
+                    className="absolute inset-0 bg-cover bg-center z-0"
+                    style={{ backgroundImage: `url(${bakeryHero})` }}
+                ></div>
                 <div className="absolute inset-0 bg-[#3D2B1F]/75 z-0 backdrop-blur-[2px]"></div>
                 <div className="relative z-10 animate-fade-in-up">
                     <p className="font-playfair italic text-[#D4A96A] tracking-[0.15em] text-lg mb-2">Welcome to</p>

@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "predeploy": "npm run build", // ← これがあるか確認
+    "deploy": "gh-pages -d dist" // ← これがあるか確認
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",

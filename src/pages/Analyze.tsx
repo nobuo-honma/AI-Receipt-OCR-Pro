@@ -78,7 +78,7 @@ export default function Analyze() {
         if (file) { setImageFile(file); setImagePreview(URL.createObjectURL(file)); setSavedSessionId(null); }
     };
 
-    // 🇯🇵 マスタ連動＆金額自己修復型 最強パーサー
+    // 🇯🇵 マスタ連動＆AI自己修復型 最強パーサー（ダブルチェック版）
     const parseReceiptText = (rawText: string): ParsedItem[] => {
         const cleanText = rawText.replace(/[※\*＊%]/g, '').replace(/[,，]/g, '').replace(/[¥\\￥]/g, '');
         const lines = cleanText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -94,35 +94,66 @@ export default function Analyze() {
             const matchedProduct = products.find(p => normalizedLine.includes(p.receipt_name) || normalizedLine.includes(p.name));
 
             if (matchedProduct) {
-                let finalQty = 1; // 最終的に採用する個数
+                let ocrQty = 1;       // 「〇点」から読み取った個数
+                let ocrTotal = 0;     // 次の行から読み取った合計金額
+                let finalQty = 1;     // 最終的に採用する個数
+                let foundLines = 0;
 
-                // 商品名から下を6行分先読みして「個数(点)」と「合計金額」を探す
+                // 商品名から下を6行分先読みして「個数」と「合計金額」の両方を探す
                 for (let j = 1; j <= 6; j++) {
                     if (i + j >= lines.length) break;
                     const lookAheadLine = lines[i + j].normalize("NFKC");
 
-                    // パターンA: 合計金額から正確な個数を逆算する（最強の修復機能）
-                    // （例: "2700" や "2,700" という数字の行を見つけたら）
-                    if (/^\d+$/.test(lookAheadLine)) {
-                        const totalPrice = parseInt(lookAheadLine, 10);
-
-                        // 読み取った数字が「マスタの単価の倍数（割り切れる）」であれば、それは合計金額！
-                        if (totalPrice >= matchedProduct.price && totalPrice % matchedProduct.price === 0) {
-                            finalQty = totalPrice / matchedProduct.price; // 合計 ÷ 単価 ＝ 正しい個数！
-                            i += j; // 見つけた行までスキップ
-                            break;  // 計算できたので探索終了
-                        }
-                    }
-
-                    // パターンB: もし合計金額が見つからなかった保険として「〇 点」の行を探す
+                    // 「〇 点」を探す
                     const qtyMatch = lookAheadLine.match(/(\d+)\s*点/);
                     if (qtyMatch) {
-                        finalQty = parseInt(qtyMatch[1], 10);
-                        i += j;
-                        break;
+                        ocrQty = parseInt(qtyMatch[1], 10);
+                        foundLines = Math.max(foundLines, j);
+                        continue;
+                    }
+
+                    // 「数字だけ（合計金額）」を探す
+                    if (/^\d+$/.test(lookAheadLine)) {
+                        const tempPrice = parseInt(lookAheadLine, 10);
+                        // マスタ単価以上の数字であれば、合計金額の行とみなす
+                        if (tempPrice >= matchedProduct.price) {
+                            ocrTotal = tempPrice;
+                            foundLines = Math.max(foundLines, j);
+                            break; // 金額を見つけたら探索終了
+                        }
                     }
                 }
 
+                // ⭐️ ダブルチェックによる自己修復ロジック ⭐️
+
+                // 1. 金額が単価で綺麗に割り切れる場合（一番確実）
+                if (ocrTotal > 0 && ocrTotal % matchedProduct.price === 0) {
+                    finalQty = ocrTotal / matchedProduct.price;
+                }
+                // 2. 金額が割り切れない（誤読の）場合、読み取った「点数」と掛け算して一番近いかチェック
+                else if (ocrTotal > 0 && ocrQty > 0) {
+                    const expectedTotal = matchedProduct.price * ocrQty;
+
+                    // OCRの読み取り金額(2790)と、計算上の金額(2700)の誤差が 20% 以内なら、
+                    // 金額の誤読とみなして、「点数(30)」の方を正解として採用する！
+                    if (Math.abs(ocrTotal - expectedTotal) / expectedTotal <= 0.2) {
+                        finalQty = ocrQty;
+                    } else {
+                        // 誤差が大きすぎる場合は、金額を単価で割った「近似値」を採用する
+                        finalQty = Math.round(ocrTotal / matchedProduct.price);
+                    }
+                }
+                // 3. どちらかしか見つからなかった場合のフォールバック
+                else if (ocrQty > 0) {
+                    finalQty = ocrQty;
+                } else if (ocrTotal > 0) {
+                    finalQty = Math.round(ocrTotal / matchedProduct.price);
+                }
+
+                // 探索した行数分だけメインのループをスキップ（無駄読み防止）
+                if (foundLines > 0) i += foundLines;
+
+                // リストに追加
                 parsedItems.push({
                     name: matchedProduct.name,
                     price: matchedProduct.price,

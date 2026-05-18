@@ -15,14 +15,13 @@ export default function Master() {
     const [editTargetQty, setEditTargetQty] = useState(0);
 
     const [showModal, setShowModal] = useState(false);
-    const [newReceiptName, setNewReceiptName] = useState("");
     const [newName, setNewName] = useState("");
+    const [newReceiptName, setNewReceiptName] = useState("");
     const [newPrice, setNewPrice] = useState<number | "">("");
 
-    // ⭐️ CSVインポート用のファイル選択枠
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [isSaving, setIsSaving] = useState(false); // ⭐️ 追加
     const [isImporting, setIsImporting] = useState(false);
-    const [isSaving, setIsSaving] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const fetchProducts = async () => {
         setLoading(true);
@@ -33,7 +32,6 @@ export default function Master() {
 
     useEffect(() => { fetchProducts(); }, []);
 
-    // ── 1. 手動での新規登録 ──
     const handleAddProduct = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newReceiptName.trim() || !newName.trim() || newPrice === "" || newPrice < 0) return;
@@ -43,15 +41,12 @@ export default function Master() {
         if (products.some(p => p.receipt_name === nReceipt)) return alert("その『レシート表示名』はすでに登録されています");
 
         setIsSaving(true);
-        try {
-            await supabase.from('products').insert({ receipt_name: nReceipt, name: nName, price: Number(newPrice), target_qty: 0 });
-            setShowModal(false); setNewReceiptName(""); setNewName(""); setNewPrice(""); fetchProducts();
-        } finally {
-            setIsSaving(false);
-        }
+        await supabase.from('products').insert({ receipt_name: nReceipt, name: nName, price: Number(newPrice), target_qty: 0 });
+        setIsSaving(false);
+
+        setShowModal(false); setNewReceiptName(""); setNewName(""); setNewPrice(""); fetchProducts();
     };
 
-    // ── 2. 編集と削除 ──
     const saveEdit = async () => {
         await supabase.from('products').update({
             receipt_name: editReceiptName.normalize("NFKC"), name: editName.normalize("NFKC"), price: editPrice, target_qty: editTargetQty
@@ -59,40 +54,32 @@ export default function Master() {
         setEditingId(null); fetchProducts();
     };
 
-    const deleteProduct = async (id: number, name: string) => {
-        if (window.confirm(`${name}を削除しますか？`)) { await supabase.from('products').delete().eq('id', id); fetchProducts(); }
+    // ⭐️ 修正：引数を id だけに変更
+    const deleteProduct = async (id: number) => {
+        if (window.confirm(`削除しますか？`)) { await supabase.from('products').delete().eq('id', id); fetchProducts(); }
     };
 
-    // ── ⭐️ 3. CSVインポート機能 ──
     const handleImportCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
-
         if (!window.confirm("CSVデータをインポートしますか？\n（同じ「レシート表示名」がある場合は上書きされます）")) {
             if (fileInputRef.current) fileInputRef.current.value = "";
             return;
         }
-
         setIsImporting(true);
-
         const reader = new FileReader();
-        reader.readAsText(file, "utf-8"); // UTF-8（またはShift-JIS）で読み込む
-
+        reader.readAsText(file, "utf-8");
         reader.onload = async (event) => {
             try {
                 const text = event.target?.result as string;
-                // 改行で分割し、空行を除去
                 const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-
                 if (lines.length <= 1) throw new Error("データがありません");
 
-                // 1行目（ヘッダー）を飛ばして2行目から処理
                 const insertData = [];
                 const upsertData = [];
 
                 for (let i = 1; i < lines.length; i++) {
                     const cols = lines[i].split(',');
-                    // 最低でも レシート表示名, 正式商品名, 単価 の3つが必要
                     if (cols.length < 3) continue;
 
                     const rName = cols[0].replace(/['"]/g, '').trim().normalize("NFKC");
@@ -101,49 +88,20 @@ export default function Master() {
                     const tQty = cols[3] ? parseInt(cols[3].replace(/['"]/g, '').trim(), 10) : 0;
 
                     if (!rName || !fName || isNaN(price)) continue;
-
-                    // 既存データ（レシート表示名）があるかチェック
                     const existingProduct = products.find(p => p.receipt_name === rName);
-
                     if (existingProduct) {
-                        // あれば上書き用配列へ
                         upsertData.push({ id: existingProduct.id, receipt_name: rName, name: fName, price, target_qty: isNaN(tQty) ? 0 : tQty });
                     } else {
-                        // なければ新規追加用配列へ
                         insertData.push({ receipt_name: rName, name: fName, price, target_qty: isNaN(tQty) ? 0 : tQty });
                     }
                 }
-
-                // データベースに送信
-                let addedCount = 0;
-                let updatedCount = 0;
-
-                if (insertData.length > 0) {
-                    const { error } = await supabase.from('products').insert(insertData);
-                    if (error) throw error;
-                    addedCount = insertData.length;
-                }
-
-                if (upsertData.length > 0) {
-                    const { error } = await supabase.from('products').upsert(upsertData); // UPSERT（上書き）
-                    if (error) throw error;
-                    updatedCount = upsertData.length;
-                }
-
+                let addedCount = 0; let updatedCount = 0;
+                if (insertData.length > 0) { const { error } = await supabase.from('products').insert(insertData); if (error) throw error; addedCount = insertData.length; }
+                if (upsertData.length > 0) { const { error } = await supabase.from('products').upsert(upsertData); if (error) throw error; updatedCount = upsertData.length; }
                 alert(`インポート完了！\n・新規追加: ${addedCount}件\n・上書き更新: ${updatedCount}件`);
-                fetchProducts(); // 画面を更新
-
-            } catch (err: any) {
-                console.error(err);
-                alert("インポートに失敗しました。CSVの形式を確認してください。\n" + err.message);
-            } finally {
-                setIsImporting(false);
-                if (fileInputRef.current) fileInputRef.current.value = ""; // ファイル選択をリセット
-            }
-        };
-        reader.onerror = () => {
-            alert("ファイルの読み込みに失敗しました。");
-            setIsImporting(false);
+                fetchProducts();
+            } catch (err: any) { alert("インポートに失敗しました。\n" + err.message); }
+            finally { setIsImporting(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
         };
     };
 
@@ -151,30 +109,12 @@ export default function Master() {
         <div className="p-8 max-w-6xl mx-auto">
             <div className="flex flex-col md:flex-row justify-between items-end md:items-center mb-4 border-b-2 border-bakery-border pb-4 gap-4">
                 <h1 className="text-3xl font-bold text-bakery-textMain">📖 製品マスタ管理</h1>
-
                 <div className="flex gap-2">
-                    {/* ⭐️ CSVインポートボタン */}
-                    <input
-                        type="file"
-                        accept=".csv"
-                        className="hidden"
-                        ref={fileInputRef}
-                        onChange={handleImportCSV}
-                    />
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isImporting}
-                        className="bg-white border-2 border-[#10B981] text-[#10B981] hover:bg-green-50 px-6 py-2 rounded-md font-bold transition-colors shadow-sm disabled:opacity-50"
-                    >
+                    <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleImportCSV} />
+                    <button onClick={() => fileInputRef.current?.click()} disabled={isImporting} className="bg-white border-2 border-[#10B981] text-[#10B981] hover:bg-green-50 px-6 py-2 rounded-md font-bold transition-colors shadow-sm disabled:opacity-50">
                         {isImporting ? '⏳ 読込中...' : '📥 CSVインポート'}
                     </button>
-
-                    <button
-                        onClick={() => setShowModal(true)}
-                        className="bg-bakery-primary hover:bg-[#8B5E3C] text-white px-6 py-2 rounded-md font-bold transition-colors shadow-sm"
-                    >
-                        ➕ 新規商品
-                    </button>
+                    <button onClick={() => setShowModal(true)} className="bg-bakery-primary hover:bg-[#8B5E3C] text-white px-6 py-2 rounded-md font-bold transition-colors shadow-sm">➕ 新規商品</button>
                 </div>
             </div>
 
@@ -210,7 +150,7 @@ export default function Master() {
                                     <td className="p-4 text-center whitespace-nowrap">
                                         {editingId === p.id ? <button onClick={saveEdit} className="bg-green-500 text-white px-3 py-1 rounded">保存</button>
                                             : <button onClick={() => { setEditingId(p.id); setEditReceiptName(p.receipt_name || p.name); setEditName(p.name); setEditPrice(p.price); setEditTargetQty(p.target_qty); }} className="text-sm border px-3 py-1 rounded hover:bg-[#F5EDD6]">編集</button>}
-                                        {!editingId && <button onClick={() => deleteProduct(p.id, p.name)} className="text-sm text-red-500 ml-2 hover:underline">削除</button>}
+                                        {!editingId && <button onClick={() => deleteProduct(p.id)} className="text-sm text-red-500 ml-2 hover:underline">削除</button>} // ⭐️ 修正
                                     </td>
                                 </tr>
                             ))}
@@ -219,13 +159,12 @@ export default function Master() {
                 </div>
             )}
 
-            {/* 新規登録モーダル */}
             {showModal && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
                     <form onSubmit={handleAddProduct} className="bg-bakery-bg p-8 rounded-xl w-full max-w-md space-y-4 relative">
                         <button type="button" onClick={() => setShowModal(false)} className="absolute top-4 right-4 text-gray-500">✖</button>
                         <h2 className="text-2xl font-bold mb-4">新規商品の登録</h2>
-                        <div><label className="block text-xs font-bold text-gray-500 mb-1">レシート表示名（印字どおりに入力）</label><input required type="text" value={newReceiptName} onChange={e => setNewReceiptName(e.target.value)} className="w-full p-3 border rounded focus:ring-2 focus:ring-bakery-gold outline-none" /></div>
+                        <div><label className="block text-xs font-bold text-gray-500 mb-1">レシート表示名（印字どおり）</label><input required type="text" value={newReceiptName} onChange={e => setNewReceiptName(e.target.value)} className="w-full p-3 border rounded focus:ring-2 focus:ring-bakery-gold outline-none" /></div>
                         <div><label className="block text-xs font-bold text-bakery-primary mb-1">正式商品名</label><input required type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-3 border rounded focus:ring-2 focus:ring-bakery-gold outline-none" /></div>
                         <div><label className="block text-xs font-bold text-bakery-primary mb-1">単価</label><input required type="number" value={newPrice} onChange={e => setNewPrice(Number(e.target.value))} className="w-full p-3 border rounded focus:ring-2 focus:ring-bakery-gold outline-none" /></div>
                         <button type="submit" disabled={isSaving} className="w-full py-3 mt-2 bg-bakery-primary text-white rounded font-bold">登録する</button>

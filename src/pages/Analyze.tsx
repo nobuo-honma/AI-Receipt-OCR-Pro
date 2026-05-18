@@ -78,58 +78,59 @@ export default function Analyze() {
         if (file) { setImageFile(file); setImagePreview(URL.createObjectURL(file)); setSavedSessionId(null); }
     };
 
-    // 🇯🇵 マスタ連動型 最強パーサー（日計表・集計レシート対応版）
+    // 🇯🇵 マスタ連動＆金額自己修復型 最強パーサー
     const parseReceiptText = (rawText: string): ParsedItem[] => {
         const cleanText = rawText.replace(/[※\*＊%]/g, '').replace(/[,，]/g, '').replace(/[¥\\￥]/g, '');
         const lines = cleanText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
         const parsedItems: ParsedItem[] = [];
 
-        // 邪魔な文字を弾く
-        const ignoreWords = ["合計", "お預", "お釣", "釣銭", "レジ", "電話", "住所", "店舗", "小計", "税", "割引", "ポイント", "領収", "担当", "日付", "対象", "クレジット", "売上票", "控え", "番号", "支払", "ID", "取", "日計", "点検"];
+        const ignoreWords = ["合計", "お預", "お釣", "釣銭", "レジ", "電話", "住所", "店舗", "小計", "税", "割引", "ポイント", "領収", "担当", "日付", "対象", "クレジット", "売上票", "控え", "番号", "支払", "ID", "取", "日計", "点検", "金額"];
 
         for (let i = 0; i < lines.length; i++) {
             const currentLine = lines[i];
             if (ignoreWords.some(word => currentLine.includes(word))) continue;
 
-            // 1. まずマスタと照合して、現在の行が「商品名」か判定する
             const normalizedLine = currentLine.normalize("NFKC");
             const matchedProduct = products.find(p => normalizedLine.includes(p.receipt_name) || normalizedLine.includes(p.name));
 
             if (matchedProduct) {
-                let itemQty = 1; // 基本の個数は1
-                let isReportFormat = false;
+                let finalQty = 1; // 最終的に採用する個数
 
-                // 2. ⭐️ 日計表の対応：商品名が見つかったら、そこから下を「4行分」先読みして「〇 点」を探す
-                for (let j = 1; j <= 4; j++) {
-                    if (i + j < lines.length) {
-                        const lookAheadLine = lines[i + j].normalize("NFKC");
+                // 商品名から下を6行分先読みして「個数(点)」と「合計金額」を探す
+                for (let j = 1; j <= 6; j++) {
+                    if (i + j >= lines.length) break;
+                    const lookAheadLine = lines[i + j].normalize("NFKC");
 
-                        // "30 点" や "個数 30 点" を探す正規表現
-                        const qtyMatch = lookAheadLine.match(/(\d+)\s*点/);
-                        if (qtyMatch) {
-                            itemQty = parseInt(qtyMatch[1], 10);
-                            isReportFormat = true;
-                            i += j; // 見つけた「点数」の行までループをスキップさせる（無駄読み防止）
-                            break;
+                    // パターンA: 合計金額から正確な個数を逆算する（最強の修復機能）
+                    // （例: "2700" や "2,700" という数字の行を見つけたら）
+                    if (/^\d+$/.test(lookAheadLine)) {
+                        const totalPrice = parseInt(lookAheadLine, 10);
+
+                        // 読み取った数字が「マスタの単価の倍数（割り切れる）」であれば、それは合計金額！
+                        if (totalPrice >= matchedProduct.price && totalPrice % matchedProduct.price === 0) {
+                            finalQty = totalPrice / matchedProduct.price; // 合計 ÷ 単価 ＝ 正しい個数！
+                            i += j; // 見つけた行までスキップ
+                            break;  // 計算できたので探索終了
                         }
+                    }
+
+                    // パターンB: もし合計金額が見つからなかった保険として「〇 点」の行を探す
+                    const qtyMatch = lookAheadLine.match(/(\d+)\s*点/);
+                    if (qtyMatch) {
+                        finalQty = parseInt(qtyMatch[1], 10);
+                        i += j;
+                        break;
                     }
                 }
 
-                // 3. 日計表でない通常のレシートの場合は、次の行の金額（数字）をスキップする
-                if (!isReportFormat && i + 1 < lines.length && /^\d+$/.test(lines[i + 1])) {
-                    i++;
-                }
-
-                // 4. マスタの「正しい商品名」と「正しい単価」に、読み取った「個数」を掛けて登録する！
                 parsedItems.push({
                     name: matchedProduct.name,
                     price: matchedProduct.price,
-                    qty: itemQty
+                    qty: finalQty
                 });
             }
         }
 
-        // 同じ商品の合算処理
         const aggregated: Record<string, ParsedItem> = {};
         parsedItems.forEach(item => {
             const key = `${item.name}_${item.price}`;

@@ -78,38 +78,48 @@ export default function Analyze() {
         if (file) { setImageFile(file); setImagePreview(URL.createObjectURL(file)); setSavedSessionId(null); }
     };
 
-    // 🇯🇵 マスタ連動＆AI自己修復型 最強パーサー（ダブルチェック版）
+    // 🇯🇵 マスタ連動＆AI自己修復型 最強パーサー（厳格ブロック処理版）
     const parseReceiptText = (rawText: string): ParsedItem[] => {
         const cleanText = rawText.replace(/[※\*＊%]/g, '').replace(/[,，]/g, '').replace(/[¥\\￥]/g, '');
         const lines = cleanText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
         const parsedItems: ParsedItem[] = [];
 
-        const ignoreWords = ["合計", "お預", "お釣", "釣銭", "レジ", "電話", "住所", "店舗", "小計", "税", "割引", "ポイント", "領収", "担当", "日付", "対象", "クレジット", "売上票", "控え", "番号", "支払", "ID", "取", "日計", "点検", "金額"];
+        const ignoreWords = ["合計", "お預", "お釣", "釣銭", "レジ", "電話", "住所", "店舗", "小計", "税", "割引", "ポイント", "領収", "担当", "日付", "対象", "クレジット", "売上票", "控え", "番号", "支払", "ID", "取", "日計", "点検", "金額", "個数"];
 
         for (let i = 0; i < lines.length; i++) {
             const currentLine = lines[i];
             if (ignoreWords.some(word => currentLine.includes(word))) continue;
 
             const normalizedLine = currentLine.normalize("NFKC");
-            const matchedProduct = products.find(p => normalizedLine.includes(p.receipt_name) || normalizedLine.includes(p.name));
+            // ⭐️ 修正1: 部分一致（includes）ではなく、完全一致（===）または前方一致（startsWith）にして誤爆を防ぐ
+            const matchedProduct = products.find(p =>
+                normalizedLine === p.receipt_name.normalize("NFKC") ||
+                normalizedLine === p.name.normalize("NFKC") ||
+                normalizedLine.startsWith(p.receipt_name.normalize("NFKC"))
+            );
 
             if (matchedProduct) {
-                let ocrQty = 1;       // 「〇点」から読み取った個数
-                let ocrTotal = 0;     // 次の行から読み取った合計金額
-                let finalQty = 1;     // 最終的に採用する個数
+                let ocrQty = 1;
+                let ocrTotal = 0;
+                let finalQty = 1;
                 let foundLines = 0;
 
-                // 商品名から下を6行分先読みして「個数」と「合計金額」の両方を探す
+                // 商品名から下を最大6行先読みする
                 for (let j = 1; j <= 6; j++) {
                     if (i + j >= lines.length) break;
                     const lookAheadLine = lines[i + j].normalize("NFKC");
+
+                    // ⭐️ 修正2: もし探索途中で「別の商品名」や「無視ワード（合計など）」が出てきたら、
+                    // そこで探索を強制終了する（他の商品の「4点」などを巻き込むのを防ぐため！）
+                    if (ignoreWords.some(w => lookAheadLine.includes(w)) && !lookAheadLine.includes("点")) break;
+                    if (products.some(p => lookAheadLine === p.receipt_name.normalize("NFKC") || lookAheadLine === p.name.normalize("NFKC"))) break;
 
                     // 「〇 点」を探す
                     const qtyMatch = lookAheadLine.match(/(\d+)\s*点/);
                     if (qtyMatch) {
                         ocrQty = parseInt(qtyMatch[1], 10);
                         foundLines = Math.max(foundLines, j);
-                        continue;
+                        continue; // 点数を見つけても、まだ金額があるかもしれないので探索を続ける
                     }
 
                     // 「数字だけ（合計金額）」を探す
@@ -119,41 +129,32 @@ export default function Analyze() {
                         if (tempPrice >= matchedProduct.price) {
                             ocrTotal = tempPrice;
                             foundLines = Math.max(foundLines, j);
-                            break; // 金額を見つけたら探索終了
+                            break; // 金額を見つけたらこの商品のブロックは終了
                         }
                     }
                 }
 
-                // ⭐️ ダブルチェックによる自己修復ロジック ⭐️
-
-                // 1. 金額が単価で綺麗に割り切れる場合（一番確実）
+                // ダブルチェックによる自己修復ロジック
                 if (ocrTotal > 0 && ocrTotal % matchedProduct.price === 0) {
                     finalQty = ocrTotal / matchedProduct.price;
                 }
-                // 2. 金額が割り切れない（誤読の）場合、読み取った「点数」と掛け算して一番近いかチェック
                 else if (ocrTotal > 0 && ocrQty > 0) {
                     const expectedTotal = matchedProduct.price * ocrQty;
-
-                    // OCRの読み取り金額(2790)と、計算上の金額(2700)の誤差が 20% 以内なら、
-                    // 金額の誤読とみなして、「点数(30)」の方を正解として採用する！
                     if (Math.abs(ocrTotal - expectedTotal) / expectedTotal <= 0.2) {
                         finalQty = ocrQty;
                     } else {
-                        // 誤差が大きすぎる場合は、金額を単価で割った「近似値」を採用する
                         finalQty = Math.round(ocrTotal / matchedProduct.price);
                     }
                 }
-                // 3. どちらかしか見つからなかった場合のフォールバック
                 else if (ocrQty > 0) {
                     finalQty = ocrQty;
                 } else if (ocrTotal > 0) {
                     finalQty = Math.round(ocrTotal / matchedProduct.price);
                 }
 
-                // 探索した行数分だけメインのループをスキップ（無駄読み防止）
+                // 探索した行数分だけスキップ
                 if (foundLines > 0) i += foundLines;
 
-                // リストに追加
                 parsedItems.push({
                     name: matchedProduct.name,
                     price: matchedProduct.price,

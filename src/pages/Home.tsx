@@ -6,18 +6,18 @@ export default function Home() {
             {/* ヒーローセクション */}
             <div className="relative text-center px-10 pt-12 pb-10 shadow-lg overflow-hidden rounded-b-2xl mb-4">
                 <div className="absolute inset-0 bg-cover bg-center z-0" style={{ backgroundImage: "url('./bakery-hero.jpg')" }}></div>
-                <div className="absolute inset-0 bg-[#3D2B1F]/75 z-0 backdrop-blur-[2px]"></div>
+                <div className="absolute inset-0 bg-bakery-textMain/75 z-0 backdrop-blur-[2px]"></div>
                 <div className="relative z-10 animate-fade-in-up">
-                    <p className="font-playfair italic text-[#D4A96A] tracking-[0.15em] text-sm mb-1">Welcome to</p>
+                    <p className="font-playfair italic text-bakery-gold tracking-[0.15em] text-sm mb-1">Welcome to</p>
                     <h1 className="font-zen font-black text-[#FDF6E3] text-3xl md:text-4xl tracking-widest mb-3 drop-shadow-md">AI Bakery Manager</h1>
-                    <p className="font-zen text-[#E0C898] tracking-[0.15em] text-xs font-bold">OCR · Reservation · Sales · Chat</p>
+                    <p className="font-zen text-bakery-border tracking-[0.15em] text-xs font-bold">OCR · Reservation · Sales · Chat</p>
                 </div>
             </div>
 
             <div className="flex items-center justify-center gap-3 my-6 px-4">
-                <div className="h-px w-24 bg-gradient-to-r from-transparent to-[#C4A882]"></div>
+                <div className="h-px w-24 bg-linear-to-r from-transparent to-[#C4A882]"></div>
                 <p className="font-playfair italic text-[#9B7B52] tracking-[0.14em] text-xs md:text-sm">— Main Menu —</p>
-                <div className="h-px w-24 bg-gradient-to-l from-transparent to-[#C4A882]"></div>
+                <div className="h-px w-24 bg-linear-to-l from-transparent to-[#C4A882]"></div>
             </div>
 
             <div className="max-w-5xl mx-auto px-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 w-full">

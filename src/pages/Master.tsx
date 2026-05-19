@@ -149,7 +149,7 @@ export default function Master() {
                                     </td>
                                     <td className="p-4 text-center whitespace-nowrap">
                                         {editingId === p.id ? <button onClick={saveEdit} className="bg-green-500 text-white px-3 py-1 rounded">保存</button>
-                                            : <button onClick={() => { setEditingId(p.id); setEditReceiptName(p.receipt_name || p.name); setEditName(p.name); setEditPrice(p.price); setEditTargetQty(p.target_qty); }} className="text-sm border px-3 py-1 rounded hover:bg-[#F5EDD6]">編集</button>}
+                                            : <button onClick={() => { setEditingId(p.id); setEditReceiptName(p.receipt_name || p.name); setEditName(p.name); setEditPrice(p.price); setEditTargetQty(p.target_qty); }} className="text-sm border px-3 py-1 rounded hover:bg-bakery-bg">編集</button>}
                                         {!editingId && <button onClick={() => deleteProduct(p.id)} className="text-sm text-red-500 ml-2 hover:underline">削除</button>} // ⭐️ 修正
                                     </td>
                                 </tr>

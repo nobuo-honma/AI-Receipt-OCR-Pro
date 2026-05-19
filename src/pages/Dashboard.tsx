@@ -121,14 +121,14 @@ export default function Dashboard() {
                         <h2 className="text-xl font-bold mb-4 flex items-center gap-2">🗓️ 商品別 × 日別 販売個数カレンダー</h2>
                         <div className="overflow-x-auto pb-4">
                             <table className="w-full text-sm text-left border-collapse min-w-max">
-                                <thead><tr className="bg-bakery-bg text-bakery-primary border-b-2"><th className="p-3 sticky left-0 bg-bakery-bg z-10 shadow font-bold">商品名</th><th className="p-3 text-center border-l bg-[#FDF0D5]">期間合計</th>{dailyData.dates.map(date => (<th key={date} className="p-3 text-center border-l font-bold">{formatShortDate(date)}</th>))}</tr></thead>
+                                <thead><tr className="bg-bakery-bg text-bakery-primary border-b-2"><th className="p-3 sticky left-0 bg-bakery-bg z-10 shadow font-bold">商品名</th><th className="p-3 text-center border-l bg-bakery-surface">期間合計</th>{dailyData.dates.map(date => (<th key={date} className="p-3 text-center border-l font-bold">{formatShortDate(date)}</th>))}</tr></thead>
                                 <tbody>
                                     {Object.entries(dailyData.items).map(([itemName, dateMap], index) => {
                                         const totalForThisItem = Object.values(dateMap).reduce((sum, qty) => sum + qty, 0);
                                         return (
                                             <tr key={itemName} className={`border-b hover:bg-[#FAFAFA] ${index % 2 !== 0 ? 'bg-[#FCFBFA]' : ''}`}>
                                                 <td className="p-3 font-bold sticky left-0 bg-inherit z-10 shadow">{itemName}</td>
-                                                <td className="p-3 text-center font-bold text-bakery-primary border-l bg-[#FDF0D5]/50">{totalForThisItem}</td>
+                                                <td className="p-3 text-center font-bold text-bakery-primary border-l bg-bakery-surface/50">{totalForThisItem}</td>
                                                 {dailyData.dates.map(date => { const qty = dateMap[date] || 0; return (<td key={date} className={`p-3 text-center border-l ${qty > 0 ? 'font-bold' : 'text-gray-300'}`}>{qty > 0 ? qty : '-'}</td>); })}
                                             </tr>
                                         );

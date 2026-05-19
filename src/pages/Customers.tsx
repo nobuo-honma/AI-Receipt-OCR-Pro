@@ -121,11 +121,11 @@ export default function Customers() {
                     </div>
                     {activeTab === 'list' ? (
                         <div className="flex gap-2">
-                            <button onClick={() => window.print()} disabled={filteredCustomers.length === 0} className="bg-white border-2 border-[#8B6340] text-[#8B6340] hover:bg-[#FDF0D5] px-6 py-2 rounded-md font-bold">🖨️ ラベル印刷</button>
+                            <button onClick={() => window.print()} disabled={filteredCustomers.length === 0} className="bg-white border-2 border-[#8B6340] text-[#8B6340] hover:bg-bakery-surface px-6 py-2 rounded-md font-bold">🖨️ ラベル印刷</button>
                             <button onClick={() => setShowModal(true)} className="bg-bakery-primary hover:bg-[#8B5E3C] text-white px-6 py-2 rounded-md font-bold">➕ 新規顧客</button>
                         </div>
                     ) : (
-                        <button onClick={() => setShowResModal(true)} className="bg-[#D4A96A] hover:bg-[#C4A882] text-white px-6 py-2 rounded-md font-bold">🥐 予約注文を入れる</button>
+                        <button onClick={() => setShowResModal(true)} className="bg-bakery-gold hover:bg-[#C4A882] text-white px-6 py-2 rounded-md font-bold">🥐 予約注文を入れる</button>
                     )}
                 </div>
 
@@ -145,7 +145,7 @@ export default function Customers() {
                                     <h2 className="text-xl font-bold mb-2">{c.name}</h2>
                                     <div className="text-xs text-[#8B6340] mb-4 space-y-1"><p>📞 {c.phone}</p><p>🏠 {c.address}</p></div>
                                     <div className="bg-bakery-surface p-3 rounded-md mb-4 text-sm font-bold text-bakery-primary">⭐ ポイント: {c.points} pt</div>
-                                    <div className="flex justify-between text-xs text-[#6B4226] border-t pt-3"><span>来店 {c.visit_count}回</span><span>累計 ￥{c.total_spent.toLocaleString()}</span></div>
+                                    <div className="flex justify-between text-xs text-bakery-primary border-t pt-3"><span>来店 {c.visit_count}回</span><span>累計 ￥{c.total_spent.toLocaleString()}</span></div>
                                 </div>
                             ))}
                         </div>
@@ -199,13 +199,13 @@ export default function Customers() {
                                         <div className="max-h-60 overflow-y-auto grid grid-cols-2 gap-2">
                                             {products.map(p => {
                                                 const qty = orderItems.find(i => i.productId === p.id)?.qty || 0;
-                                                return <div key={p.id} className={`flex justify-between items-center p-2 border rounded ${qty > 0 ? 'bg-[#FDF0D5] border-[#D4A96A]' : ''}`}><span className="text-sm font-bold truncate pr-2">{p.name} ￥{p.price}</span><div className="flex items-center gap-2"><button type="button" onClick={() => handleOrderChange(p.id, qty - 1)} className="w-6 h-6 bg-gray-200 rounded-full font-bold">-</button><span className="w-4 text-center text-sm font-bold">{qty}</span><button type="button" onClick={() => handleOrderChange(p.id, qty + 1)} className="w-6 h-6 bg-bakery-primary text-white rounded-full font-bold">+</button></div></div>
+                                                return <div key={p.id} className={`flex justify-between items-center p-2 border rounded ${qty > 0 ? 'bg-bakery-surface border-bakery-gold' : ''}`}><span className="text-sm font-bold truncate pr-2">{p.name} ￥{p.price}</span><div className="flex items-center gap-2"><button type="button" onClick={() => handleOrderChange(p.id, qty - 1)} className="w-6 h-6 bg-gray-200 rounded-full font-bold">-</button><span className="w-4 text-center text-sm font-bold">{qty}</span><button type="button" onClick={() => handleOrderChange(p.id, qty + 1)} className="w-6 h-6 bg-bakery-primary text-white rounded-full font-bold">+</button></div></div>
                                             })}
                                         </div>
                                     )}
                                 </div>
                                 <input type="text" placeholder="備考・メモ" value={resMemo} onChange={e => setResMemo(e.target.value)} className="w-full p-3 border rounded" />
-                                <button type="submit" disabled={isSaving} className="w-full py-3 bg-[#D4A96A] text-white rounded-lg font-bold">注文確定</button>
+                                <button type="submit" disabled={isSaving} className="w-full py-3 bg-bakery-gold text-white rounded-lg font-bold">注文確定</button>
                             </form>
                         </div>
                     </div>

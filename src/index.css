@@ -1,10 +1,20 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
+@import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+
+@theme {
+  --font-zen: "Zen Kaku Gothic New", sans-serif;
+  --font-playfair: "Playfair Display", serif;
+
+  --color-bakery-bg: #F5EDD6;
+  --color-bakery-surface: #FDF0D5;
+  --color-bakery-border: #E0C898;
+  --color-bakery-textMain: #3D2B1F;
+  --color-bakery-primary: #6B4226;
+  --color-bakery-gold: #D4A96A;
+  --color-bakery-danger: #C0392B;
+}
 
 body {
   background-color: #F5EDD6;
-  font-family: 'Zen Kaku Gothic New', sans-serif;
+  font-family: "Zen Kaku Gothic New", sans-serif;
 }

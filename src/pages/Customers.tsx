@@ -140,7 +140,7 @@ export default function Customers() {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             {filteredCustomers.map(c => (
                                 <div key={c.id} className="bg-white p-6 rounded-xl border shadow-sm relative group hover:shadow-md">
-                                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-bakery-gold to-bakery-primary"></div>
+                                    <div className="absolute top-0 left-0 w-full h-1 bg-linear-to-r from-bakery-gold to-bakery-primary"></div>
                                     <button onClick={() => handleDeleteCustomer(c.id, c.name)} className="absolute top-3 right-3 text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100">🗑️</button>
                                     <h2 className="text-xl font-bold mb-2">{c.name}</h2>
                                     <div className="text-xs text-[#8B6340] mb-4 space-y-1"><p>📞 {c.phone}</p><p>🏠 {c.address}</p></div>

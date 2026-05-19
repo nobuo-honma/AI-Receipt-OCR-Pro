@@ -28,9 +28,9 @@ export default function Home() {
             </div>
 
             <div className="flex items-center justify-center gap-3 my-6 px-4">
-                <div className="h-px w-24 bg-gradient-to-r from-transparent to-[#C4A882]"></div>
+                <div className="h-px w-24 bg-linear-to-r from-transparent to-[#C4A882]"></div>
                 <p className="font-playfair italic text-[#9B7B52] tracking-[0.14em] text-xs md:text-sm">— Main Menu —</p>
-                <div className="h-px w-24 bg-gradient-to-l from-transparent to-[#C4A882]"></div>
+                <div className="h-px w-24 bg-linear-to-l from-transparent to-[#C4A882]"></div>
             </div>
 
             {/* ⭐️ メニューカード（3列×2段のコンパクト設計に変更） */}

@@ -5,13 +5,25 @@ export default function Home() {
     return (
         <div className="min-h-screen pb-10 flex flex-col">
             {/* ヒーローセクション（少し高さを抑えてコンパクトに） */}
-            <div className="relative text-center px-10 pt-12 pb-10 shadow-lg overflow-hidden rounded-b-2xl mb-4">
-                <div className="absolute inset-0 bg-cover bg-center z-0" style={{ backgroundImage: "url('/bakery-hero.jpg')" }}></div>
-                <div className="absolute inset-0 bg-[#3D2B1F]/75 z-0 backdrop-blur-[2px]"></div>
+            <div
+                className="relative text-center px-10 pt-12 pb-10 shadow-lg overflow-hidden rounded-b-2xl mb-4 bg-cover bg-center"
+                // ⭐️ ここで直接 public フォルダの画像を読み込ませます
+                style={{ backgroundImage: "url('/bakery-hero.jpg')" }}
+            >
+                {/* 焦げ茶色の半透明オーバーレイ（背景のパン写真を少し暗くして文字を読ませる） */}
+                <div className="absolute inset-0 bg-[#3D2B1F]/70 backdrop-blur-sm z-0"></div>
+
+                {/* 文字コンテンツ（z-10 でフィルターの上に浮かせる） */}
                 <div className="relative z-10 animate-fade-in-up">
-                    <p className="font-playfair italic text-[#D4A96A] tracking-[0.15em] text-sm mb-1">Welcome to</p>
-                    <h1 className="font-zen font-black text-[#FDF6E3] text-3xl md:text-4xl tracking-widest mb-3 drop-shadow-md">🥐 AI Bakery Manager</h1>
-                    <p className="font-zen text-[#E0C898] tracking-[0.15em] text-xs font-bold">レシートOCR ・ 予約注文 ・ 売上集計 ・ 業務チャット</p>
+                    <p className="font-playfair italic text-[#D4A96A] tracking-[0.15em] text-sm mb-1">
+                        Welcome to
+                    </p>
+                    <h1 className="font-zen font-black text-[#FDF6E3] text-3xl md:text-4xl tracking-widest mb-3 drop-shadow-md">
+                        🥐 AI Bakery Manager
+                    </h1>
+                    <p className="font-zen text-[#E0C898] tracking-[0.15em] text-xs font-bold">
+                        レシートOCR ・ 予約注文 ・ 売上集計 ・ 業務チャット
+                    </p>
                 </div>
             </div>
 

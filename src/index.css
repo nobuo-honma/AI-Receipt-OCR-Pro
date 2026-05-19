@@ -1,21 +1,10 @@
-/* ==========================================
-   ⚡ 1. Tailwind CSS v4 コアインポート（Viteプラグイン仕様）
-   ========================================== */
-/* ⭕ 相対パスは不要です。Viteプラグインが安全に絶対解決します。 */
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* ==========================================
-   ⚡ 2. 新規格テーマカスタマイズ（@theme）以下略...
-   ========================================== */
-@theme {
-  --font-zen: "Zen Kaku Gothic", "BIZ UDPGothic", "Hiragino Kaku Gothic ProN", "Helvetica Neue", Arial, sans-serif;
-  --color-bakery-textMain: #4a3b32; 
-  --color-bakery-bg: #fcf9f2;       
-  
-  --utility-bg-pattern: {
-    background-image: radial-gradient(#e1d7c6 1px, transparent 1px);
-    background-size: 20px 20px;
-  };
+@import url('https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+
+body {
+  background-color: #F5EDD6;
+  font-family: 'Zen Kaku Gothic New', sans-serif;
 }
-
-/* --- (以下、bodyや@media printの設定はそのまま残してください) --- */

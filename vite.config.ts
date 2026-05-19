@@ -3,5 +3,5 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: './', // 🌟 ここを追加！すべての資産の読み込みを相対パス（./assets/...）に変更します
+  base: '/AI-Receipt-OCR-Pro/',  // ← GitHub Pages は https://user.github.io/repo-name/ になるため必須
 })

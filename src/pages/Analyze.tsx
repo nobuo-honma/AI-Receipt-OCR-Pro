@@ -13,6 +13,15 @@ interface ReceiptItem {
 }
 type Customer = { id: number; name: string; visit_count: number; points: number; first_visit: string; total_spent: number; };
 
+// ⭐️ カテゴリ変換用マスタ（CAT_001 などのIDから、正しい名前に変換するための辞書）
+const CATEGORY_MAP: Record<string, string> = {
+    "CAT_001": "🍞 パン",
+    "CAT_002": "🍪 クッキー",
+    "CAT_003": "🍦 ソフトクリーム",
+    "CAT_004": "☕ コーヒー",
+    "CAT_UNKNOWN": "❓ 未分類"
+};
+
 export default function Analyze() {
     // ── ステート管理 ──
     const [loading, setLoading] = useState<boolean>(false);
@@ -29,25 +38,28 @@ export default function Analyze() {
 
     // カメラ・QR連携用
     const [showQrModal, setShowQrModal] = useState<boolean>(false);
-    const [currentUrl, setCurrentUrl] = useState<string>('');
+    const [currentUrl] = useState<string>(
+        typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}${import.meta.env.BASE_URL}` : ''
+    );
     const [isCameraActive, setIsCameraActive] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const fileInputRefNormal = useRef<HTMLInputElement>(null);
 
+    const stopCamera = useCallback(() => {
+        if (videoRef.current?.srcObject) { (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop()); videoRef.current.srcObject = null; }
+        setIsCameraActive(false);
+    }, []);
+
     // ── 初期化処理 ──
     useEffect(() => {
-        // 現在のURL（GitHub Pagesのパスも含む）を取得
-        if (typeof window !== 'undefined') setCurrentUrl(`${window.location.protocol}//${window.location.host}${import.meta.env.BASE_URL}`);
-
         const fetchData = async () => {
             const { data } = await supabase.from('customers').select('*').order('last_visit', { ascending: false });
             if (data) setCustomers(data);
         };
         fetchData();
 
-        // スマホからの転送画像を監視
         const sub = supabase.channel('public:transfer_images')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'transfer_images' }, payload => {
                 setImageBase64(payload.new.image_base64);
@@ -58,7 +70,7 @@ export default function Analyze() {
             }).subscribe();
 
         return () => { supabase.removeChannel(sub); stopCamera(); };
-    }, []);
+    }, [stopCamera]);
 
     // ── 画像処理系 ──
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -94,13 +106,8 @@ export default function Analyze() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
             if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); setIsCameraActive(true); }
-        } catch (err) { alert("カメラの起動に失敗しました"); }
+        } catch { alert("カメラの起動に失敗しました"); }
     };
-
-    const stopCamera = useCallback(() => {
-        if (videoRef.current?.srcObject) { (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop()); videoRef.current.srcObject = null; }
-        setIsCameraActive(false);
-    }, []);
 
     const capturePhoto = () => {
         if (!videoRef.current || !canvasRef.current) return;
@@ -119,12 +126,10 @@ export default function Analyze() {
         setLoading(true); setItems([]);
 
         try {
-            // ⭐ Supabase Edge Function (Gemini) を呼び出し
             const { data, error } = await supabase.functions.invoke('analyze-receipt', { body: { imageBase64 } });
             if (error) throw error;
             if (data.error) throw new Error(data.error);
 
-            // 追加モード（複数枚対応）
             const newItems = data.items || [];
             if (newItems.length === 0) alert("商品が読み取れませんでした。");
             else setItems(prev => [...prev, ...newItems]);
@@ -133,7 +138,7 @@ export default function Analyze() {
         } finally { setLoading(false); }
     };
 
-    const handleItemChange = (index: number, field: keyof ReceiptItem, value: any) => {
+    const handleItemChange = (index: number, field: keyof ReceiptItem, value: string | number | boolean) => {
         const updatedItems = [...items];
         updatedItems[index] = { ...updatedItems[index], [field]: value };
         setItems(updatedItems);
@@ -151,12 +156,17 @@ export default function Analyze() {
             const { data, error } = await supabase.from('scan_sessions').insert({ scanned_at: getFormattedDate(), total_amt: calculateTotal() }).select('id').single();
             if (error || !data) throw error;
 
-            // カテゴリを含めて保存
+            // ⭐️ 修正：CAT_001 などのIDを「🍞 パン」という名前に変換してから保存する
             await supabase.from('scan_items').insert(savePayload.map(i => ({
-                session_id: data.id, name: i.name, unit_price: i.price, quantity: i.qty, subtotal: i.price * i.qty, category: i.category_id
+                session_id: data.id, 
+                name: i.name, 
+                unit_price: i.price, 
+                quantity: i.qty, 
+                subtotal: i.price * i.qty, 
+                category: CATEGORY_MAP[i.category_id] || i.category_id // ← ここが変換の魔法
             })));
             setSavedSessionId(data.id); alert("ダッシュボードに売上を保存しました！");
-        } catch (err) { alert("保存に失敗しました"); } finally { setIsSaving(false); }
+        } catch { alert("保存に失敗しました"); } finally { setIsSaving(false); }
     };
 
     const handleLinkCustomer = async () => {
@@ -169,7 +179,7 @@ export default function Analyze() {
             await supabase.from('customer_purchases').insert({ customer_id: c.id, session_id: savedSessionId, purchased_at: getFormattedDate(), amount: total, points_earned: pts, memo: "AIレシート解析" });
             await supabase.from('customers').update({ total_spent: c.total_spent + total, points: c.points + pts, visit_count: c.visit_count + 1 }).eq('id', c.id);
             alert(`${c.name}さんに ${pts}pt 付与しました！`); setSelectedCustomerId("");
-        } catch (err) { alert("ポイント付与に失敗しました"); } finally { setIsSaving(false); }
+        } catch { alert("ポイント付与に失敗しました"); } finally { setIsSaving(false); }
     };
 
     return (

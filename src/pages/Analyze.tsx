@@ -8,19 +8,13 @@ interface ReceiptItem {
     name: string;
     price: number;
     qty: number;
-    category_id: string;
+    category: string; // ⭐️ category_id から category に変更（マスタの文字を直接入れる）
     is_filtered?: boolean;
 }
 type Customer = { id: number; name: string; visit_count: number; points: number; first_visit: string; total_spent: number; };
 
-// ⭐️ カテゴリ変換用マスタ（CAT_001 などのIDから、正しい名前に変換するための辞書）
-const CATEGORY_MAP: Record<string, string> = {
-    "CAT_001": "🍞 パン",
-    "CAT_002": "🍪 クッキー",
-    "CAT_003": "🍦 ソフトクリーム",
-    "CAT_004": "☕ コーヒー",
-    "CAT_UNKNOWN": "❓ 未分類"
-};
+// ⭐️ Product（マスタデータ）の型定義を追加
+type Product = { id: number; receipt_name: string; name: string; price: number; category: string; };
 
 export default function Analyze() {
     // ── ステート管理 ──
@@ -32,31 +26,32 @@ export default function Analyze() {
 
     // データベース連携用
     const [customers, setCustomers] = useState<Customer[]>([]);
+    const [products, setProducts] = useState<Product[]>([]); // ⭐️ マスタデータ保持用
     const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
     const [savedSessionId, setSavedSessionId] = useState<number | null>(null);
     const [isSaving, setIsSaving] = useState(false);
 
     // カメラ・QR連携用
     const [showQrModal, setShowQrModal] = useState<boolean>(false);
-    const [currentUrl] = useState<string>(
-        typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}${import.meta.env.BASE_URL}` : ''
-    );
+    const [currentUrl, setCurrentUrl] = useState<string>('');
     const [isCameraActive, setIsCameraActive] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const fileInputRefNormal = useRef<HTMLInputElement>(null);
 
-    const stopCamera = useCallback(() => {
-        if (videoRef.current?.srcObject) { (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop()); videoRef.current.srcObject = null; }
-        setIsCameraActive(false);
-    }, []);
-
     // ── 初期化処理 ──
     useEffect(() => {
+        if (typeof window !== 'undefined') setCurrentUrl(`${window.location.protocol}//${window.location.host}${import.meta.env.BASE_URL}`);
+
         const fetchData = async () => {
-            const { data } = await supabase.from('customers').select('*').order('last_visit', { ascending: false });
-            if (data) setCustomers(data);
+            // 顧客の取得
+            const { data: cData } = await supabase.from('customers').select('*').order('last_visit', { ascending: false });
+            if (cData) setCustomers(cData);
+
+            // ⭐️ マスタデータの取得
+            const { data: pData } = await supabase.from('products').select('*');
+            if (pData) setProducts(pData);
         };
         fetchData();
 
@@ -70,7 +65,7 @@ export default function Analyze() {
             }).subscribe();
 
         return () => { supabase.removeChannel(sub); stopCamera(); };
-    }, [stopCamera]);
+    }, []);
 
     // ── 画像処理系 ──
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,8 +101,13 @@ export default function Analyze() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
             if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); setIsCameraActive(true); }
-        } catch { alert("カメラの起動に失敗しました"); }
+        } catch (err) { alert("カメラの起動に失敗しました"); }
     };
+
+    const stopCamera = useCallback(() => {
+        if (videoRef.current?.srcObject) { (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop()); videoRef.current.srcObject = null; }
+        setIsCameraActive(false);
+    }, []);
 
     const capturePhoto = () => {
         if (!videoRef.current || !canvasRef.current) return;
@@ -120,7 +120,7 @@ export default function Analyze() {
         setSavedSessionId(null); stopCamera();
     };
 
-    // ── Gemini解析処理 ──
+    // ── Gemini解析＆マスタ照合処理 ──
     const handleAnalyze = async () => {
         if (!imageBase64) return alert("画像をセットしてください");
         setLoading(true); setItems([]);
@@ -130,9 +130,53 @@ export default function Analyze() {
             if (error) throw error;
             if (data.error) throw new Error(data.error);
 
-            const newItems = data.items || [];
-            if (newItems.length === 0) alert("商品が読み取れませんでした。");
-            else setItems(prev => [...prev, ...newItems]);
+            let newItems = data.items || [];
+            
+            if (newItems.length === 0) {
+                alert("商品が読み取れませんでした。");
+            } else {
+                // ⭐️ 魔法のロジック：AIの読み取り結果を、マスタデータと照合して「自動補正・カテゴリ分類」する
+                newItems = newItems.map((item: any) => {
+                    const normalizedItemName = item.name.normalize("NFKC");
+                    
+                    // マスタの中から、レシート印字名 または 正式商品名 が含まれているものを探す
+                    const matchedProduct = products.find(p => 
+                        normalizedItemName.includes(p.receipt_name) || normalizedItemName.includes(p.name)
+                    );
+
+                    if (matchedProduct) {
+                        // マスタに存在する場合は、名前・単価・カテゴリをマスタの正しい情報で上書きする！
+                        return {
+                            name: matchedProduct.name,
+                            price: matchedProduct.price,
+                            qty: item.qty || 1,
+                            category: matchedProduct.category || "❓ 未分類",
+                            is_filtered: item.is_filtered || false
+                        };
+                    } else {
+                        // マスタに無い新商品の場合は、AIの読み取りをそのまま活かす
+                        return {
+                            name: item.name,
+                            price: item.price,
+                            qty: item.qty || 1,
+                            category: "❓ 未分類", // マスタにないので未分類
+                            is_filtered: item.is_filtered || false
+                        };
+                    }
+                });
+
+                // 同一商品の合算処理（複数枚読み込んだ時用）
+                const combined = [...items, ...newItems];
+                const agg: Record<string, ReceiptItem> = {};
+                combined.forEach((i: ReceiptItem) => { 
+                    const k = `${i.name}_${i.price}`; 
+                    if (agg[k]) agg[k].qty += i.qty; 
+                    else agg[k] = { ...i }; 
+                });
+                
+                setItems(Object.values(agg));
+                setSavedSessionId(null);
+            }
         } catch (err) {
             console.error(err); alert("解析に失敗しました。");
         } finally { setLoading(false); }
@@ -156,14 +200,14 @@ export default function Analyze() {
             const { data, error } = await supabase.from('scan_sessions').insert({ scanned_at: getFormattedDate(), total_amt: calculateTotal() }).select('id').single();
             if (error || !data) throw error;
 
-            // ⭐️ 修正：CAT_001 などのIDを「🍞 パン」という名前に変換してから保存する
+            // ⭐️ カテゴリを含めて保存 (CATEGORY_MAPでの変換は不要。直接マスタの文字が入る)
             await supabase.from('scan_items').insert(savePayload.map(i => ({
                 session_id: data.id, 
                 name: i.name, 
                 unit_price: i.price, 
                 quantity: i.qty, 
                 subtotal: i.price * i.qty, 
-                category: CATEGORY_MAP[i.category_id] || i.category_id // ← ここが変換の魔法
+                category: i.category 
             })));
             setSavedSessionId(data.id); alert("ダッシュボードに売上を保存しました！");
         } catch { alert("保存に失敗しました"); } finally { setIsSaving(false); }
@@ -181,6 +225,10 @@ export default function Analyze() {
             alert(`${c.name}さんに ${pts}pt 付与しました！`); setSelectedCustomerId("");
         } catch { alert("ポイント付与に失敗しました"); } finally { setIsSaving(false); }
     };
+
+    // ⭐️ 手動編集用プルダウンのための、マスタに存在するユニークなカテゴリ一覧を抽出
+    const uniqueCategories = Array.from(new Set(products.map(p => p.category).filter(Boolean)));
+    if (!uniqueCategories.includes("❓ 未分類")) uniqueCategories.push("❓ 未分類");
 
     return (
         <div className="p-4 md:p-8 max-w-7xl mx-auto flex flex-col lg:flex-row gap-8">
@@ -261,12 +309,11 @@ export default function Analyze() {
                                                 <td className="p-2"><input type="number" value={item.price} onChange={(e) => handleItemChange(idx, 'price', Number(e.target.value))} className="w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none text-right" /></td>
                                                 <td className="p-2"><input type="number" value={item.qty} onChange={(e) => handleItemChange(idx, 'qty', Number(e.target.value))} className="w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none text-center" /></td>
                                                 <td className="p-2">
-                                                    <select value={item.category_id} onChange={(e) => handleItemChange(idx, 'category_id', e.target.value)} className="w-full p-2 border border-transparent hover:border-gray-300 rounded bg-transparent focus:border-bakery-gold outline-none text-xs">
-                                                        <option value="CAT_001">🍞 パン</option>
-                                                        <option value="CAT_002">🍪 クッキー</option>
-                                                        <option value="CAT_003">🍦 ソフトクリーム</option>
-                                                        <option value="CAT_004">☕ コーヒー</option>
-                                                        <option value="CAT_UNKNOWN">❓ 未分類</option>
+                                                    {/* ⭐️ プルダウンの選択肢をマスタに存在するカテゴリから動的に生成 */}
+                                                    <select value={item.category} onChange={(e) => handleItemChange(idx, 'category', e.target.value)} className="w-full p-2 border border-transparent hover:border-gray-300 rounded bg-transparent focus:border-bakery-gold outline-none text-xs">
+                                                        {uniqueCategories.map(cat => (
+                                                            <option key={cat} value={cat}>{cat}</option>
+                                                        ))}
                                                     </select>
                                                 </td>
                                                 <td className="p-2 text-center">

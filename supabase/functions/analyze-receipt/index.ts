@@ -1,138 +1,52 @@
-// @ts-ignore
+// supabase/functions/analyze-receipt/index.ts
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-declare const Deno: any;
-
-// CORSヘッダー定義
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-interface FilterRule {
-  id: string;
-  keyword: string;
-  match_type: 'equals' | 'contains';
-  action_type: 'exclude' | 'category_assign';
-  target_category_id: string;
-  is_active: boolean;
-}
-
-interface RawReceiptItem {
-  name?: string;
-  price?: number;
-  qty?: number;
-}
-
-interface ProcessedReceiptItem {
-  name: string;
-  price: number;
-  qty: number;
-  category_id: string;
-  is_filtered: boolean;
-}
-
-interface ParsedReceiptData {
-  items?: RawReceiptItem[];
-  error?: string;
-}
-
-// 🌟 鉄壁のブラケット平衡カウンタ型パーサー（Deno環境仕様）
-const strictExtractJSON = (inputText: string): ParsedReceiptData => {
-  let targetText = inputText.trim();
-
-  // マークダウン記号の物理剥奪
-  targetText = targetText.replace(/```json/gi, '').replace(/```/g, '').trim();
-
-  const firstBraceIdx = targetText.indexOf('{');
-  if (firstBraceIdx === -1) {
-    throw new Error("AIの応答内に有効なJSONブロック（{）が見つかりませんでした。");
-  }
-
-  let braceCount = 0;
-  let lastBraceIdx = -1;
-  let inString = false;
-  let escapeActive = false;
-
-  for (let i = firstBraceIdx; i < targetText.length; i++) {
-    const char = targetText[i];
-
-    if (char === '"' && !escapeActive) {
-      inString = !inString;
-    }
-
-    if (char === '\\' && inString) {
-      escapeActive = !escapeActive;
-    } else {
-      escapeActive = false;
-    }
-
-    if (!inString) {
-      if (char === '{') {
-        braceCount++;
-      } else if (char === '}') {
-        braceCount--;
-        if (braceCount === 0) {
-          lastBraceIdx = i;
-          break; // 最初の完全なJSONオブジェクトの終端に達したため走査終了
-        }
-      }
-    }
-  }
-
-  if (lastBraceIdx === -1) {
-    throw new Error("JSON構造の対応する閉じ括弧（}）が不足しているか、途中で切れています。");
-  }
-
-  const sanitizedJsonStr = targetText.substring(firstBraceIdx, lastBraceIdx + 1).trim();
-
-  try {
-    return JSON.parse(sanitizedJsonStr) as ParsedReceiptData;
-  } catch (parseError: any) {
-    try {
-      const cleanedStr = sanitizedJsonStr
-        .replace(/[\u0000-\u001F\u007F-\u009F]/g, "") // 制御コードの完全排除
-        .replace(/\\'/g, "'");
-      return JSON.parse(cleanedStr) as ParsedReceiptData;
-    } catch {
-      throw new Error(`JSON構文が不正です。(${parseError.message})`);
-    }
-  }
-};
-
-Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
     const { imageBase64 } = await req.json()
-    if (!imageBase64) {
-      throw new Error("画像データ(imageBase64)がありません。")
-    }
+    if (!imageBase64) throw new Error("画像データがありません。")
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? ""
     const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-    // フィルタマスタの取得
-    const { data: filterRules, error: dbError } = await supabase
-      .from('m_filter_rules')
-      .select('*')
-      .eq('is_active', true) as { data: FilterRule[] | null, error: any }
+    // 1. フィルタマスタの取得
+    const { data: filterRules } = await supabase.from('m_filter_rules').select('*').eq('is_active', true)
 
-    if (dbError) throw new Error(`マスタの取得に失敗しました: ${dbError.message}`)
+    // ⭐️ 2. 学習データ（過去の修正履歴）を取得する！
+    // 直近100件の「間違えた文字」と「正解の文字」を取得して、AIへのプロンプトに混ぜ込みます。
+    const { data: learningLogs } = await supabase.from('ai_learning_logs').select('*').order('created_at', { ascending: false }).limit(100)
 
-    // Gemini API 呼び出し
+    // 学習データから、AIへの指示文（Few-Shotプロンプト）を作る
+    let learningPrompt = "";
+    if (learningLogs && learningLogs.length > 0) {
+      learningPrompt = "\n【過去の修正履歴（重要ルール）】\n以下の文字が含まれている場合は、右側の正しい商品名に変換して出力してください。\n"
+      // 同じ修正を何度も教えないように重複を排除する
+      const uniqueRules = new Map<string, string>();
+      learningLogs.forEach((log: any) => uniqueRules.set(log.original_text, log.corrected_text));
+      uniqueRules.forEach((corrected, original) => {
+        learningPrompt += `・「${original}」と見えたら → 「${corrected}」とする\n`;
+      });
+    }
+
+    // 3. Gemini API 呼び出し
     const apiKey = Deno.env.get("GEMINI_API_KEY") ?? ""
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
 
-    const systemPrompt = `画像にあるレシートから商品名(name)、個数(qty)、金額(price)を抽出して以下のJSONフォーマットのみで出力してください。
+    // ⭐️ プロンプトに学習データを合体させる！
+    const systemPrompt = `画像にあるレシートから商品名、単価、個数を抽出して以下のJSONフォーマットのみで出力してください。
 解説、挨拶、マークダウンの枠（\`\`\`json等）は一切含めず、最初の文字は必ず"{"、最後の文字は必ず"}"にしてください。
-商品の数量が不明な場合はデフォルトで1を設定してください。
-金額は数値型(number)で抽出してください。
-
+単価は割引などを加味した1個あたりの最終的な数値を計算して入れてください。
+${learningPrompt}
 {
   "items": [
     { "name": "商品名", "price": 100, "qty": 1 }
@@ -143,83 +57,47 @@ Deno.serve(async (req: Request) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: systemPrompt },
-            { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
-          ]
-        }]
+        contents: [{ parts: [{ text: systemPrompt }, { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }] }]
       })
     })
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Gemini API エラー: ${response.status} - ${errText}`);
-    }
-
     const aiData = await response.json()
-    const rawAiText: string = aiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
+    let rawAiText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    // サーバー側で厳密にクレンジングを実行
-    const parsedData = strictExtractJSON(rawAiText);
+    // クレンジング処理
+    if (rawAiText.includes("```")) rawAiText = rawAiText.replace(/```json/g, "").replace(/```/g, "")
+    rawAiText = rawAiText.trim()
+    const jsonMatch = rawAiText.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error("AIの応答から有効なJSON構造が検出されませんでした。")
 
-    // マスタフィルタリングロジックの実行
-    let processedItems: ProcessedReceiptItem[] = [];
+    const cleanJsonText = jsonMatch[0]
+    let parsedData
+    try { parsedData = JSON.parse(cleanJsonText) } catch (err) { throw new Error(`JSONパースエラー: AIの生成データが破損しています。`) }
 
+    // マスタフィルタリングロジック
     if (parsedData.items && Array.isArray(parsedData.items)) {
-      const normalizeText = (text: string) => {
-        return text.toUpperCase().replace(/[\u30a1-\u30f6]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0x60))
-      }
-
-      processedItems = parsedData.items.map((item: RawReceiptItem): ProcessedReceiptItem => {
-        const name = item.name ? String(item.name) : "不明な商品"
-        const price = item.price ? Number(item.price) : 0
-        const qty = item.qty ? Number(item.qty) : 1
-
-        const itemNameNormalized = normalizeText(name)
-        let isExcluded = false
-        let assignedCategoryId = "CAT_UNKNOWN"
+      const normalizeText = (text: string) => text.toUpperCase().normalize("NFKC")
+      parsedData.items = parsedData.items.map((item: any) => {
+        if (!item.name) return item
+        const itemNameNormalized = normalizeText(item.name)
+        let isExcluded = false; let assignedCategoryId = "CAT_UNKNOWN"
 
         for (const rule of filterRules || []) {
           const ruleKeywordNormalized = normalizeText(rule.keyword)
-          let isMatch = false
-
-          if (rule.match_type === 'equals') {
-            isMatch = (itemNameNormalized === ruleKeywordNormalized)
-          } else {
-            isMatch = (itemNameNormalized.includes(ruleKeywordNormalized))
-          }
-
+          let isMatch = rule.match_type === 'equals' ? (itemNameNormalized === ruleKeywordNormalized) : (itemNameNormalized.includes(ruleKeywordNormalized))
           if (isMatch) {
-            if (rule.action_type === 'exclude') {
-              isExcluded = true
-            } else if (rule.action_type === 'category_assign') {
-              assignedCategoryId = rule.target_category_id
-            }
+            if (rule.action_type === 'exclude') isExcluded = true
+            else if (rule.action_type === 'category_assign') assignedCategoryId = rule.target_category_id
             break
           }
         }
-
-        return {
-          name,
-          price,
-          qty,
-          category_id: assignedCategoryId,
-          is_filtered: isExcluded
-        }
+        return { ...item, category_id: assignedCategoryId, is_filtered: isExcluded }
       })
     }
 
-    return new Response(
-      JSON.stringify({ items: processedItems }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
-    )
+    return new Response(JSON.stringify(parsedData), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 })
 
   } catch (error) {
-    console.error("【Edge Function内部エラー】", error);
-    return new Response(
-      JSON.stringify({ items: [], error: error instanceof Error ? error.message : "Internal Server Error" }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
-    )
+    return new Response(JSON.stringify({ items: [], error: error instanceof Error ? error.message : "Internal Error" }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 })
   }
 })

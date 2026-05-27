@@ -5,9 +5,19 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 
 type Product = { id: number; name: string; price: number; target_qty: number; category: string; };
 
-export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'monthly_report'>('dashboard');
+// ⭐️ 分析画面と同じ「カテゴリID → 表示名」の変換マスタを用意
+const CATEGORY_MAP: Record<string, string> = {
+  "CAT_001": "🍞 パン",
+  "CAT_002": "🍪 クッキー",
+  "CAT_003": "🍦 ソフトクリーム",
+  "CAT_004": "☕ コーヒー",
+  "CAT_UNKNOWN": "❓ 未分類"
+};
 
+export default function Dashboard() {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'monthly_production' | 'monthly_sales'>('dashboard');
+
+  // ── ダッシュボード用ステート ──
   const [ranking, setRanking] = useState<{ name: string, category: string, totalSales: number, totalQty: number }[]>([]);
   const [dailyData, setDailyData] = useState<{ dates: string[], items: Record<string, { category: string, dateMap: Record<string, number> }> }>({ dates: [], items: {} });
   const [startDate, setStartDate] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]; });
@@ -15,11 +25,11 @@ export default function Dashboard() {
   const [filterText, setFilterText] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
 
+  // ── 月報（製造・販売）用ステート ──
   const [reportMonth, setReportMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
   const [products, setProducts] = useState<Product[]>([]);
-  const [reportMatrix, setReportMatrix] = useState<Record<string, Record<number, number>>>({});
-  // ⭐️ 新規：製造実績のデータ保持用
-  const [prodMatrix, setProdMatrix] = useState<Record<string, Record<number, number>>>({});
+  const [salesMatrix, setSalesMatrix] = useState<Record<string, Record<number, number>>>({}); // 販売実績
+  const [prodMatrix, setProdMatrix] = useState<Record<string, Record<number, number>>>({});  // 製造実績
 
   const fetchDashboardData = async () => {
     const { data: sessionData } = await supabase.from('scan_sessions').select('id, scanned_at').gte('scanned_at', `${startDate} 00:00:00`).lte('scanned_at', `${endDate} 23:59:59`);
@@ -33,9 +43,12 @@ export default function Dashboard() {
         const agg: Record<string, any> = {};
         const crossTable: Record<string, { category: string, dateMap: Record<string, number> }> = {};
         itemsData.forEach(item => {
-          const cat = item.category || "❓ 未分類";
+          // ⭐️ DBに保存されているID(CAT_001等)を、画面表示用の名前(🍞 パン等)に変換する
+          const cat = CATEGORY_MAP[item.category] || item.category || "❓ 未分類";
+
           if (!agg[item.name]) agg[item.name] = { name: item.name, category: cat, totalSales: 0, totalQty: 0 };
-          agg[item.name].totalSales += item.subtotal; agg[item.name].totalQty += item.quantity;
+          agg[item.name].totalSales += item.subtotal;
+          agg[item.name].totalQty += item.quantity;
 
           const itemDate = sessionDateMap[item.session_id];
           if (!crossTable[item.name]) crossTable[item.name] = { category: cat, dateMap: {} };
@@ -57,10 +70,9 @@ export default function Dashboard() {
     const startStr = `${reportMonth}-01 00:00:00`;
     const endStr = `${reportMonth}-${lastDay} 23:59:59`;
 
-    // 販売実績の取得
+    // 1. 販売実績（scan_items）の取得
     const { data: sessionData } = await supabase.from('scan_sessions').select('id, scanned_at').gte('scanned_at', startStr).lte('scanned_at', endStr);
-    const matrix: Record<string, Record<number, number>> = {};
-
+    const sMatrix: Record<string, Record<number, number>> = {};
     if (sessionData && sessionData.length > 0) {
       const sessionDateMap: Record<number, number> = {};
       sessionData.forEach(s => { sessionDateMap[s.id] = parseInt(s.scanned_at.split(' ')[0].split('-')[2], 10); });
@@ -68,15 +80,15 @@ export default function Dashboard() {
       if (itemsData) {
         itemsData.forEach(item => {
           const day = sessionDateMap[item.session_id];
-          if (!matrix[item.name]) matrix[item.name] = {};
-          if (!matrix[item.name][day]) matrix[item.name][day] = 0;
-          matrix[item.name][day] += item.quantity;
+          if (!sMatrix[item.name]) sMatrix[item.name] = {};
+          if (!sMatrix[item.name][day]) sMatrix[item.name][day] = 0;
+          sMatrix[item.name][day] += item.quantity;
         });
       }
     }
-    setReportMatrix(matrix);
+    setSalesMatrix(sMatrix);
 
-    // ⭐️ 製造実績の取得
+    // 2. 製造実績（production_records）の取得
     const { data: prodData } = await supabase.from('production_records').select('*').gte('production_date', `${reportMonth}-01`).lte('production_date', `${reportMonth}-${lastDay}`);
     const pMatrix: Record<string, Record<number, number>> = {};
     if (prodData && pData) {
@@ -93,19 +105,19 @@ export default function Dashboard() {
   };
 
   useEffect(() => { if (activeTab === 'dashboard') fetchDashboardData(); }, [startDate, endDate, activeTab]);
-  useEffect(() => { if (activeTab === 'monthly_report') fetchMonthlyReportData(); }, [reportMonth, activeTab]);
+  useEffect(() => { if (activeTab === 'monthly_production' || activeTab === 'monthly_sales') fetchMonthlyReportData(); }, [reportMonth, activeTab]);
 
   const handleDeleteAll = async () => {
-    if (window.confirm("本当に全ての履歴を削除しますか？\n（※顧客データは消えません）")) {
+    if (window.confirm("本当に全ての履歴を削除しますか？\n（※顧客データやマスタは消えません）")) {
       await supabase.from('scan_items').delete().neq('id', 0);
       await supabase.from('scan_sessions').delete().neq('id', 0);
-      await supabase.from('production_records').delete().neq('id', 0); // 製造実績もリセット
+      await supabase.from('production_records').delete().neq('id', 0);
       fetchDashboardData(); fetchMonthlyReportData();
     }
   };
 
   const handlePrint = () => {
-    if (activeTab === 'monthly_report') alert("印刷設定で「レイアウト」を『横』にし、「余白」を『なし』に設定してPDF保存してください。");
+    if (activeTab !== 'dashboard') alert("印刷設定で「レイアウト」を『横』にし、「余白」を『なし』に設定してPDF保存してください。");
     window.print();
   };
 
@@ -123,18 +135,31 @@ export default function Dashboard() {
     link.download = `売上集計_${startDate}_${endDate}.csv`; link.click();
   };
 
+  const formatShortDate = (dateStr: string) => { const [, month, day] = dateStr.split('-'); return `${parseInt(month)}/${parseInt(day)}`; };
+
+  // 絞り込み処理
+  const filteredRanking = ranking.filter(r => r.name.includes(filterText) && (filterCategory === "" || r.category === filterCategory));
+  const uniqueCategories = Array.from(new Set(ranking.map(r => r.category))).sort();
+  const filteredDailyItems = Object.entries(dailyData.items).filter(([name, data]) => name.includes(filterText) && (filterCategory === "" || data.category === filterCategory));
+
+  const groupedDailyItems: Record<string, typeof filteredDailyItems> = {};
+  filteredDailyItems.forEach(item => { const cat = item[1].category; if (!groupedDailyItems[cat]) groupedDailyItems[cat] = []; groupedDailyItems[cat].push(item); });
+  const sortedCategoryKeys = Object.keys(groupedDailyItems).sort();
+
+  // 月報用計算ヘルパー
   const reportYear = parseInt(reportMonth.split('-')[0]);
   const reportMonthNum = parseInt(reportMonth.split('-')[1]);
   const daysInMonth = new Date(reportYear, reportMonthNum, 0).getDate();
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const dayOfWeekStr = ['日', '月', '火', '水', '木', '金', '土'];
 
-  const dailyTotals: Record<number, number> = {};
-  let grandTotalQty = 0; let grandTotalPrice = 0;
+  const dailyTotalsSales: Record<number, number> = {};
+  let grandTotalSalesQty = 0; let grandTotalSalesPrice = 0;
+  products.forEach(p => { let pQty = 0; daysArray.forEach(d => { const qty = salesMatrix[p.name]?.[d] || 0; if (!dailyTotalsSales[d]) dailyTotalsSales[d] = 0; dailyTotalsSales[d] += qty; pQty += qty; }); grandTotalSalesQty += pQty; grandTotalSalesPrice += pQty * p.price; });
 
-  // 絞り込み処理
-  const filteredRanking = ranking.filter(r => r.name.includes(filterText) && (filterCategory === "" || r.category === filterCategory));
-  const uniqueCategories = Array.from(new Set(ranking.map(r => r.category))).sort();
+  const dailyTotalsProd: Record<number, number> = {};
+  let grandTotalProdQty = 0;
+  products.forEach(p => { let pQty = 0; daysArray.forEach(d => { const qty = prodMatrix[p.name]?.[d] || 0; if (!dailyTotalsProd[d]) dailyTotalsProd[d] = 0; dailyTotalsProd[d] += qty; pQty += qty; }); grandTotalProdQty += pQty; });
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto bg-bakery-bg">
@@ -142,8 +167,9 @@ export default function Dashboard() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
           <h1 className="text-3xl font-bold text-bakery-textMain">📈 売上・製造ダッシュボード</h1>
           <div className="flex bg-white rounded-lg p-1 border border-bakery-border shadow-sm">
-            <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-md font-bold text-sm transition-colors ${activeTab === 'dashboard' ? 'bg-bakery-gold text-white' : 'text-[#8B6340] hover:bg-gray-50'}`}>📊 売上ダッシュボード</button>
-            <button onClick={() => setActiveTab('monthly_report')} className={`px-4 py-2 rounded-md font-bold text-sm transition-colors ${activeTab === 'monthly_report' ? 'bg-bakery-gold text-white' : 'text-[#8B6340] hover:bg-gray-50'}`}>📅 月間出荷表 (PDF用)</button>
+            <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-md font-bold text-sm transition-colors ${activeTab === 'dashboard' ? 'bg-bakery-gold text-white' : 'text-[#8B6340] hover:bg-gray-50'}`}>📊 ダッシュボード</button>
+            <button onClick={() => setActiveTab('monthly_production')} className={`px-4 py-2 rounded-md font-bold text-sm transition-colors ${activeTab === 'monthly_production' ? 'bg-[#8B5E3C] text-white' : 'text-[#8B6340] hover:bg-gray-50'}`}>🍞 製造実績表</button>
+            <button onClick={() => setActiveTab('monthly_sales')} className={`px-4 py-2 rounded-md font-bold text-sm transition-colors ${activeTab === 'monthly_sales' ? 'bg-bakery-primary text-white' : 'text-[#8B6340] hover:bg-gray-50'}`}>🛒 販売実績表</button>
           </div>
         </div>
         <div className="flex gap-2">
@@ -152,6 +178,9 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* ========================================================
+          タブ1: 売上ダッシュボード (グラフ + カテゴリ別表)
+          ======================================================== */}
       {activeTab === 'dashboard' && (
         <div className="animate-fade-in-up">
           <div className="no-print bg-white p-4 rounded-xl border border-bakery-border shadow-sm mb-6 flex flex-col lg:flex-row items-center justify-between gap-4">
@@ -164,23 +193,61 @@ export default function Dashboard() {
           {ranking.length === 0 ? (
             <div className="no-print border-2 border-dashed border-bakery-border p-16 text-center rounded-lg text-[#8B6340] bg-bakery-surface"><p className="text-4xl mb-4">📊</p><p>指定期間のデータがありません。</p></div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-bakery-border h-[350px] flex flex-col"><h2 className="text-lg font-bold mb-4">💰 売上金額 TOP10</h2><div className="flex-1 min-h-0"><ResponsiveContainer width="100%" height="100%"><BarChart data={filteredRanking.slice(0, 10)} layout="vertical" margin={{ left: 40, right: 20 }}><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F', fontSize: 12 }} /><Tooltip formatter={(v: any) => [`￥${Number(v).toLocaleString()}`, "売上"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} /><Bar dataKey="totalSales" radius={[0, 4, 4, 0]}>{filteredRanking.slice(0, 10).map((_, i) => <Cell key={i} fill="#8B5E3C" />)}</Bar></BarChart></ResponsiveContainer></div></div>
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-bakery-border h-[350px] flex flex-col"><h2 className="text-lg font-bold mb-4">📦 販売個数 TOP10</h2><div className="flex-1 min-h-0"><ResponsiveContainer width="100%" height="100%"><BarChart data={[...filteredRanking].sort((a, b) => b.totalQty - a.totalQty).slice(0, 10)} layout="vertical" margin={{ left: 40, right: 20 }}><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F', fontSize: 12 }} /><Tooltip formatter={(v: any) => [`${Number(v).toLocaleString()} 個`, "個数"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} /><Bar dataKey="totalQty" radius={[0, 4, 4, 0]}>{filteredRanking.slice(0, 10).map((_, i) => <Cell key={i} fill="#D4A96A" />)}</Bar></BarChart></ResponsiveContainer></div></div>
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-bakery-border h-[350px] flex flex-col"><h2 className="text-lg font-bold mb-4">💰 売上金額 TOP10</h2><div className="flex-1 min-h-0"><ResponsiveContainer width="100%" height="100%"><BarChart data={filteredRanking.slice(0, 10)} layout="vertical" margin={{ left: 40, right: 20 }}><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F', fontSize: 12 }} /><Tooltip formatter={(v: any) => [`￥${Number(v).toLocaleString()}`, "売上"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} /><Bar dataKey="totalSales" radius={[0, 4, 4, 0]}>{filteredRanking.slice(0, 10).map((_, i) => <Cell key={i} fill="#8B5E3C" />)}</Bar></BarChart></ResponsiveContainer></div></div>
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-bakery-border h-[350px] flex flex-col"><h2 className="text-lg font-bold mb-4">📦 販売個数 TOP10</h2><div className="flex-1 min-h-0"><ResponsiveContainer width="100%" height="100%"><BarChart data={[...filteredRanking].sort((a, b) => b.totalQty - a.totalQty).slice(0, 10)} layout="vertical" margin={{ left: 40, right: 20 }}><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F', fontSize: 12 }} /><Tooltip formatter={(v: any) => [`${Number(v).toLocaleString()} 個`, "個数"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} /><Bar dataKey="totalQty" radius={[0, 4, 4, 0]}>{filteredRanking.slice(0, 10).map((_, i) => <Cell key={i} fill="#D4A96A" />)}</Bar></BarChart></ResponsiveContainer></div></div>
+              </div>
+
+              {/* ⭐️ カテゴリ別クロス集計表 */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-bakery-border overflow-hidden">
+                <h2 className="no-print text-xl font-bold text-bakery-textMain mb-4 flex items-center gap-2">🗓️ 商品別 × 日別 販売個数一覧（カテゴリ別）</h2>
+                <div className="overflow-x-auto pb-4">
+                  <table className="w-full text-sm text-left border-collapse min-w-max">
+                    <thead><tr className="bg-bakery-surface text-bakery-primary border-b-2"><th className="p-3 sticky left-0 bg-bakery-surface z-10 font-bold border-r">カテゴリ・商品名</th><th className="p-3 text-center border-r bg-[#FDF0D5] font-bold">期間合計</th>{dailyData.dates.map(date => (<th key={date} className="p-3 text-center border-r font-bold">{formatShortDate(date)}</th>))}</tr></thead>
+                    <tbody>
+                      {sortedCategoryKeys.map(cat => {
+                        const itemsInCategory = groupedDailyItems[cat];
+                        const categoryTotalQty = itemsInCategory.reduce((catSum, [_, data]) => catSum + Object.values(data.dateMap).reduce((sum, q) => sum + q, 0), 0);
+                        return (
+                          <React.Fragment key={cat}>
+                            <tr className="bg-bakery-border/30 border-b border-bakery-border"><td className="p-3 font-bold text-bakery-primary sticky left-0 bg-bakery-bg z-10 border-r">📂 {cat}</td><td className="p-3 text-center font-bold text-bakery-primary border-r bg-bakery-gold/20">{categoryTotalQty}</td>{dailyData.dates.map(date => { const dateTotal = itemsInCategory.reduce((sum, [_, data]) => sum + (data.dateMap[date] || 0), 0); return (<td key={date} className={`p-3 text-center border-r ${dateTotal > 0 ? 'font-bold text-bakery-primary' : 'text-transparent'}`}>{dateTotal > 0 ? dateTotal : '-'}</td>); })}</tr>
+                            {itemsInCategory.map(([itemName, dataObj], index) => {
+                              const itemTotalQty = Object.values(dataObj.dateMap).reduce((sum, qty) => sum + qty, 0);
+                              return (
+                                <tr key={itemName} className={`border-b hover:bg-[#FAFAFA] ${index % 2 !== 0 ? 'bg-[#FCFBFA]' : ''}`}><td className="p-3 pl-8 text-bakery-textMain sticky left-0 bg-inherit z-10 border-r">└ {itemName}</td><td className="p-3 text-center font-bold text-[#8B6340] border-r bg-bakery-surface/30">{itemTotalQty}</td>{dailyData.dates.map(date => { const qty = dataObj.dateMap[date] || 0; return (<td key={date} className={`p-3 text-center border-r ${qty > 0 ? 'font-bold text-bakery-textMain' : 'text-gray-300'}`}>{qty > 0 ? qty : '-'}</td>); })}</tr>
+                              );
+                            })}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
         </div>
       )}
 
-      {activeTab === 'monthly_report' && (
+      {/* ========================================================
+          タブ2: 月間出荷表 (製造・販売 共通レイアウト)
+          ======================================================== */}
+      {(activeTab === 'monthly_production' || activeTab === 'monthly_sales') && (
         <div className="animate-fade-in-up">
           <div className="no-print bg-white p-4 rounded-xl border border-bakery-border shadow-sm mb-6 flex items-center justify-between">
             <div className="flex items-center gap-4"><span className="font-bold">📅 対象月 :</span><input type="month" value={reportMonth} onChange={e => setReportMonth(e.target.value)} className="p-2 border rounded bg-bakery-bg font-bold outline-none" /></div>
-            <p className="text-xs text-[#8B6340]">上段：製造数 / 下段：販売数</p>
+            <p className="text-xs text-[#8B6340]">印刷時はブラウザの「レイアウト」を「横(ランドスケープ)」に設定してください。</p>
           </div>
 
           <div className="bg-white p-2 md:p-6 rounded-none md:rounded-xl shadow-none md:shadow-sm border-0 md:border border-bakery-border overflow-x-auto print:p-0 print:border-0 print:shadow-none">
-            <div className="flex justify-between items-end mb-2 px-1"><span className="font-bold text-lg">{reportYear}年{reportMonthNum}月</span><h2 className="text-2xl font-bold tracking-[1em] text-center absolute left-1/2 -translate-x-1/2">出荷・製造実績表</h2><span className="text-sm">製パン・販売部門 共有</span></div>
+            <div className="flex justify-between items-end mb-2 px-1">
+              <span className="font-bold text-lg">{reportYear}年{reportMonthNum}月</span>
+              <h2 className="text-2xl font-bold tracking-[1em] text-center absolute left-1/2 -translate-x-1/2">
+                {activeTab === 'monthly_production' ? '製 造 出 荷 表' : '販 売 実 績 表'}
+              </h2>
+              <span className="text-sm">{activeTab === 'monthly_production' ? '製造部門' : '販売部門'}</span>
+            </div>
 
             <table className="w-full text-[10px] border-collapse border border-black font-sans min-w-max print:min-w-full">
               <thead>
@@ -189,7 +256,7 @@ export default function Dashboard() {
                   <th className="border border-black p-1 w-12 text-center font-normal" rowSpan={2}>単価</th>
                   {daysArray.map(d => <th key={d} className="border border-black p-0.5 text-center font-normal w-5">{d}</th>)}
                   <th className="border border-black p-1 w-12 text-center font-normal" rowSpan={2}>合計</th>
-                  <th className="border border-black p-1 w-16 text-center font-normal" rowSpan={2}>金額</th>
+                  {activeTab === 'monthly_sales' && <th className="border border-black p-1 w-16 text-center font-normal" rowSpan={2}>金額</th>}
                 </tr>
                 <tr className="bg-gray-100">
                   {daysArray.map(d => {
@@ -201,45 +268,36 @@ export default function Dashboard() {
 
               <tbody>
                 {products.map(p => {
-                  let rowTotalSales = 0; let rowTotalProd = 0;
-                  // 各商品の縦列集計（販売数のみ）
-                  daysArray.forEach(d => { const sQty = reportMatrix[p.name]?.[d] || 0; if (!dailyTotals[d]) dailyTotals[d] = 0; dailyTotals[d] += sQty; rowTotalSales += sQty; });
-                  daysArray.forEach(d => { rowTotalProd += prodMatrix[p.name]?.[d] || 0; });
-                  grandTotalQty += rowTotalSales; grandTotalPrice += rowTotalSales * p.price;
+                  let rowTotal = 0;
+                  const isSales = activeTab === 'monthly_sales';
+                  const targetMatrix = isSales ? salesMatrix : prodMatrix;
+
+                  daysArray.forEach(d => rowTotal += targetMatrix[p.name]?.[d] || 0);
 
                   return (
-                    <React.Fragment key={p.id}>
-                      {/* 製造数の行（上段） */}
-                      <tr className="bg-blue-50/30">
-                        <td className="border border-black border-b-0 p-1 truncate max-w-[140px] pl-2 font-bold text-bakery-textMain" rowSpan={2}>{p.name}</td>
-                        <td className="border border-black border-b-0 p-1 text-right pr-1" rowSpan={2}>{p.price}</td>
-                        {daysArray.map(d => { const pQty = prodMatrix[p.name]?.[d] || 0; return <td key={`p-${d}`} className={`border border-black border-b-0 border-dotted p-0.5 text-right pr-1 ${pQty === 0 ? 'text-transparent' : 'text-blue-600 font-bold'}`}>{pQty}</td>; })}
-                        <td className="border border-black border-b-0 border-dotted p-1 text-right pr-1 text-blue-600 font-bold">{rowTotalProd > 0 ? rowTotalProd : ''}</td>
-                        <td className="border border-black border-b-0 p-1 text-right pr-1" rowSpan={2}>{(rowTotalSales * p.price).toLocaleString()}</td>
-                      </tr>
-                      {/* 販売数の行（下段） */}
-                      <tr>
-                        {daysArray.map(d => {
-                          const sQty = reportMatrix[p.name]?.[d] || 0;
-                          const pQty = prodMatrix[p.name]?.[d] || 0;
-                          // 製造より売上が多い（または少ない）場合の警告色
-                          const diffClass = (sQty > 0 && pQty > 0 && sQty !== pQty) ? 'bg-red-100 text-red-600' : (sQty === 0 ? 'text-gray-300' : 'font-bold');
-                          return <td key={`s-${d}`} className={`border border-black border-t-0 p-0.5 text-right pr-1 ${diffClass}`}>{sQty > 0 ? sQty : '0'}</td>;
-                        })}
-                        <td className="border border-black border-t-0 p-1 text-right pr-1 font-bold">{rowTotalSales > 0 ? rowTotalSales : '0'}</td>
-                      </tr>
-                    </React.Fragment>
+                    <tr key={p.id} className="hover:bg-gray-50">
+                      <td className="border border-black p-1 truncate max-w-[140px] pl-2 font-bold text-bakery-textMain">{p.name}</td>
+                      <td className="border border-black p-1 text-right pr-1">{p.price}</td>
+                      {daysArray.map(d => {
+                        const qty = targetMatrix[p.name]?.[d] || 0;
+                        return <td key={d} className={`border border-black p-0.5 text-right pr-1 ${qty === 0 ? 'text-transparent' : 'font-bold'}`}>{qty > 0 ? qty : ''}</td>;
+                      })}
+                      <td className="border border-black p-1 text-right pr-1 font-bold text-bakery-primary">{rowTotal > 0 ? rowTotal : ''}</td>
+                      {isSales && <td className="border border-black p-1 text-right pr-1 font-bold text-bakery-primary">{rowTotal > 0 ? (rowTotal * p.price).toLocaleString() : ''}</td>}
+                    </tr>
                   );
                 })}
                 <tr className="bg-gray-100 font-bold border-t-2 border-black">
-                  <td className="border border-black p-1 text-center" colSpan={2}>販売 合計</td>
-                  {daysArray.map(d => <td key={d} className={`border border-black p-0.5 text-right pr-1 ${dailyTotals[d] === 0 ? 'text-gray-400 font-normal' : ''}`}>{dailyTotals[d] || 0}</td>)}
-                  <td className="border border-black p-1 text-right pr-1">{grandTotalQty}</td>
-                  <td className="border border-black p-1 text-right pr-1">{grandTotalPrice.toLocaleString()}</td>
+                  <td className="border border-black p-1 text-center" colSpan={2}>合　計</td>
+                  {daysArray.map(d => {
+                    const dTotal = activeTab === 'monthly_sales' ? dailyTotalsSales[d] : dailyTotalsProd[d];
+                    return <td key={d} className={`border border-black p-0.5 text-right pr-1 ${!dTotal ? 'text-transparent' : ''}`}>{dTotal || ''}</td>
+                  })}
+                  <td className="border border-black p-1 text-right pr-1">{activeTab === 'monthly_sales' ? grandTotalSalesQty : grandTotalProdQty}</td>
+                  {activeTab === 'monthly_sales' && <td className="border border-black p-1 text-right pr-1">{grandTotalSalesPrice.toLocaleString()}</td>}
                 </tr>
               </tbody>
             </table>
-
             <div className="flex justify-between px-1 mt-1 text-[10px] pb-10"><span className="w-40 text-transparent">_</span><span className="w-12 text-transparent">_</span>{daysArray.map(d => <span key={d} className="w-5 text-center">{d}</span>)}<span className="w-12 text-transparent">_</span><span className="w-16 text-transparent">_</span></div>
           </div>
         </div>

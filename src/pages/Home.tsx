@@ -76,6 +76,15 @@ export default function Home() {
                     </div>
                 </Link>
 
+                <Link to="/production" className="group">
+                    <div className="relative flex flex-col items-center justify-center h-full min-h-[140px] p-5 bg-bakery-surface border border-bakery-border rounded-lg shadow-sm transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-lg group-hover:bg-[#FFF8E7] group-hover:border-[#8B5E3C]">
+                        <span className="font-playfair italic text-xl text-bakery-textMain">Production</span>
+                        <span className="font-zen font-bold tracking-widest mt-1 text-bakery-textMain">製造実績入力</span>
+                        <span className="text-3xl mt-2">👨‍🍳</span>
+                        <span className="absolute bottom-2 right-2 bg-bakery-textMain text-bakery-gold font-bold text-[9px] px-2 py-0.5 rounded">OPEN ▶</span>
+                    </div>
+                </Link>
+
             </div>
         </div>
     );

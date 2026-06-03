@@ -308,7 +308,7 @@ export default function Analyze() {
                         <div className="bg-white rounded-xl shadow-sm border border-bakery-border overflow-x-auto mb-6">
                             <table className="w-full text-left text-sm border-collapse min-w-max">
                                 <thead>
-                                    <tr className="bg-bakery-bg text-[#6B4226]">
+                                    <tr className="bg-bakery-bg text-bakery-primary">
                                         <th className="p-3 border-b border-bakery-border">商品名</th>
                                         <th className="p-3 border-b border-bakery-border w-24">単価</th>
                                         <th className="p-3 border-b border-bakery-border w-16">数量</th>

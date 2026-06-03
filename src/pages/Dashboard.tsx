@@ -75,26 +75,25 @@ export default function Dashboard() {
     const endStr = `${reportMonth}-${lastDay} 23:59:59`;
 
     const { data: sessionData } = await supabase.from('scan_sessions').select('id, scanned_at, sales_type').gte('scanned_at', startStr).lte('scanned_at', endStr);
+    // 1. ショップ販売実績（scan_items）の取得
     const sShopMatrix: Record<string, Record<number, number>> = {};
-    const sWholesaleMatrix: Record<string, Record<number, number>> = {};
 
+    // ※今回は全ての売上をショップ販売として計算のベースにします
     if (sessionData && sessionData.length > 0) {
-      const sessionMap: Record<number, { day: number, type: string }> = {};
-      sessionData.forEach(s => { sessionMap[s.id] = { day: parseInt(s.scanned_at.split(' ')[0].split('-')[2], 10), type: s.sales_type || 'shop' }; });
+      const sessionMap: Record<number, { day: number }> = {};
+      sessionData.forEach(s => { sessionMap[s.id] = { day: parseInt(s.scanned_at.split(' ')[0].split('-')[2], 10) }; });
 
       const { data: itemsData } = await supabase.from('scan_items').select('session_id, name, quantity').in('session_id', sessionData.map(s => s.id));
       if (itemsData) {
         itemsData.forEach(item => {
           const sInfo = sessionMap[item.session_id];
-          const targetMatrix = sInfo.type === 'wholesale' ? sWholesaleMatrix : sShopMatrix;
-          if (!targetMatrix[item.name]) targetMatrix[item.name] = {};
-          if (!targetMatrix[item.name][sInfo.day]) targetMatrix[item.name][sInfo.day] = 0;
-          targetMatrix[item.name][sInfo.day] += item.quantity;
+          if (!sShopMatrix[item.name]) sShopMatrix[item.name] = {};
+          if (!sShopMatrix[item.name][sInfo.day]) sShopMatrix[item.name][sInfo.day] = 0;
+          sShopMatrix[item.name][sInfo.day] += item.quantity;
         });
       }
     }
     setShopSalesMatrix(sShopMatrix);
-    setWholesaleSalesMatrix(sWholesaleMatrix);
 
     const { data: prodData } = await supabase.from('production_records').select('*').gte('production_date', `${reportMonth}-01`).lte('production_date', `${reportMonth}-${lastDay}`);
     const pShopMatrix: Record<string, Record<number, number>> = {};
@@ -118,6 +117,29 @@ export default function Dashboard() {
     }
     setShopProdMatrix(pShopMatrix);
     setWholesaleProdMatrix(pWholesaleMatrix);
+
+    // ⭐️ 3. 施設買上（販売実績）の自動計算
+    // ルール：「ショップ用製造数」から「ショップ販売数」を引いた残りを、施設が買い上げたものとする
+    const sWholesaleAutoMatrix: Record<string, Record<number, number>> = {};
+
+    if (pData) {
+      pData.forEach(p => {
+        sWholesaleAutoMatrix[p.name] = {};
+        for (let day = 1; day <= lastDay; day++) {
+          const prodQty = pShopMatrix[p.name]?.[day] || 0;    // ショップ用に作った数
+          const salesQty = sShopMatrix[p.name]?.[day] || 0;   // ショップで実際に売れた数
+
+          // 余った数（作った数 - 売れた数）を計算
+          // ※もし売りすぎた場合（マイナス）は 0 にする
+          const leftover = Math.max(0, prodQty - salesQty);
+
+          if (leftover > 0) {
+            sWholesaleAutoMatrix[p.name][day] = leftover;
+          }
+        }
+      });
+    }
+    setWholesaleSalesMatrix(sWholesaleAutoMatrix);
   };
 
   useEffect(() => { if (activeTab === 'dashboard') fetchDashboardData(); }, [startDate, endDate, activeTab]);
@@ -403,7 +425,7 @@ export default function Dashboard() {
           {activeTab === 'prod_shop' && renderSingleReportTable('ショップ用 製造実績表', '厨房提出用', shopProdMatrix, true)}
           {activeTab === 'sales_shop' && renderSingleReportTable('ショップ用 販売実績表', '店舗用', shopSalesMatrix, true)}
           {activeTab === 'prod_wholesale' && renderSingleReportTable('施設買上用 製造実績表', '厨房提出用', wholesaleProdMatrix, true)}
-          {activeTab === 'sales_wholesale' && renderSingleReportTable('施設買上用 販売実績表', '店舗用', wholesaleSalesMatrix, true)}
+          {activeTab === 'sales_wholesale' && renderSingleReportTable('施設買上用 販売実績表', '自動計算 (ショップ製造数 - ショップ販売数)', wholesaleSalesMatrix, true)}
         </div>
       )}
     </div>

@@ -7,7 +7,9 @@ type Product = { id: number; name: string; target_qty: number; sort_order: numbe
 export default function Production() {
     const [products, setProducts] = useState<Product[]>([]);
     const [productionDate, setProductionDate] = useState(() => new Date().toISOString().split('T')[0]);
-    const [quantities, setQuantities] = useState<Record<number, { total: number, shop: number }>>({});
+
+    // ⭐️ 修正：ステートを「ショップ用(shop)」と「その他用(other)」で管理する
+    const [quantities, setQuantities] = useState<Record<number, { shop: number, other: number }>>({});
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
@@ -18,10 +20,13 @@ export default function Production() {
     useEffect(() => {
         const fetchTodayProduction = async () => {
             const { data } = await supabase.from('production_records').select('*').eq('production_date', productionDate);
-            const qtys: Record<number, { total: number, shop: number }> = {};
+            const qtys: Record<number, { shop: number, other: number }> = {};
             if (data) {
                 data.forEach(record => {
-                    qtys[record.product_id] = { total: record.quantity, shop: record.shop_quantity || 0 };
+                    // データベースから読み込む時、総数(quantity)からショップ用(shop_quantity)を引いて「その他用」を復元する
+                    const shop = record.shop_quantity || 0;
+                    const total = record.quantity || 0;
+                    qtys[record.product_id] = { shop: shop, other: Math.max(0, total - shop) };
                 });
             }
             setQuantities(qtys);
@@ -29,24 +34,22 @@ export default function Production() {
         fetchTodayProduction();
     }, [productionDate]);
 
-    const handleTotalQtyChange = (productId: number, qty: number) => {
+    // ⭐️ 修正：ショップ用の入力ハンドラー
+    const handleShopQtyChange = (productId: number, qty: number) => {
         const val = Math.max(0, qty);
         setQuantities(prev => ({
             ...prev,
-            [productId]: { total: val, shop: prev[productId]?.shop || 0 }
+            [productId]: { shop: val, other: prev[productId]?.other || 0 }
         }));
     };
 
-    const handleShopQtyChange = (productId: number, qty: number) => {
+    // ⭐️ 修正：その他用（外部卸し等）の入力ハンドラー
+    const handleOtherQtyChange = (productId: number, qty: number) => {
         const val = Math.max(0, qty);
-        setQuantities(prev => {
-            const currentTotal = prev[productId]?.total || 0;
-            const safeVal = Math.min(val, currentTotal > 0 ? currentTotal : val);
-            return {
-                ...prev,
-                [productId]: { total: prev[productId]?.total || safeVal, shop: safeVal }
-            };
-        });
+        setQuantities(prev => ({
+            ...prev,
+            [productId]: { shop: prev[productId]?.shop || 0, other: val }
+        }));
     };
 
     const saveProduction = async () => {
@@ -54,7 +57,8 @@ export default function Production() {
         const upsertData = Object.entries(quantities).map(([productId, data]) => ({
             product_id: parseInt(productId),
             production_date: productionDate,
-            quantity: data.total,
+            // ⭐️ 保存時に「ショップ用＋その他用」を合算して「総製造数(quantity)」としてDBに書き込む！
+            quantity: data.shop + data.other,
             shop_quantity: data.shop
         }));
 
@@ -81,8 +85,8 @@ export default function Production() {
             <div className="flex items-start gap-2 bg-[#FFF8E7] border border-bakery-border/50 text-[#8B6340] text-sm p-4 rounded-lg shadow-sm mb-6">
                 <span className="text-bakery-gold text-lg leading-none mt-0.5">💡</span>
                 <p className="leading-relaxed">
-                    「総製造数」と、そのうち店頭に並べる「ショップ用」の数を分けて入力してください。<br />
-                    （※総製造数 － ショップ用 ＝ 施設買上などの外部卸し分として計算されます）
+                    店頭に並べる「ショップ用」と、施設買上などの「その他用」を分けて入力してください。<br />
+                    （※合計数は自動で計算され、ダッシュボードに反映されます）
                 </p>
             </div>
 
@@ -93,16 +97,20 @@ export default function Production() {
                             <tr className="text-[#8B6340]">
                                 <th className="p-3">商品名</th>
                                 <th className="p-3 text-center w-24 border-l border-bakery-border/30">予定数</th>
-                                <th className="p-3 text-center w-48 border-l border-bakery-border/30 bg-bakery-surface/50">総製造数</th>
-                                <th className="p-3 text-center w-48 border-l border-bakery-border/30 bg-blue-50/50">ショップ用</th>
-                                <th className="p-3 text-center w-24 border-l border-bakery-border/30 text-gray-500">外部卸し分</th>
+                                {/* ⭐️ ヘッダーの並びを変更 */}
+                                <th className="p-3 text-center w-48 border-l border-bakery-border/30 bg-blue-50/80">ショップ用</th>
+                                <th className="p-3 text-center w-48 border-l border-bakery-border/30 bg-orange-50/80">その他用</th>
+                                <th className="p-3 text-center w-24 border-l border-bakery-border/30 bg-bakery-surface/80">合計数</th>
                             </tr>
                         </thead>
                         <tbody>
                             {products.map((p, index) => {
-                                const totalQty = quantities[p.id]?.total || 0;
                                 const shopQty = quantities[p.id]?.shop || 0;
-                                const wholesaleQty = totalQty - shopQty;
+                                const otherQty = quantities[p.id]?.other || 0;
+                                const totalQty = shopQty + otherQty; // 自動計算される合計数
+
+                                // 予定数（目標）と、自動計算された合計数を比較して色を変える
+                                const diffColor = totalQty < p.target_qty ? 'text-red-500' : totalQty > p.target_qty ? 'text-blue-500' : 'text-green-600';
 
                                 return (
                                     <tr key={p.id} className={`border-b hover:bg-[#FAFAFA] ${index % 2 !== 0 ? 'bg-[#FCFBFA]' : ''}`}>
@@ -112,16 +120,7 @@ export default function Production() {
                                         </td>
                                         <td className="p-3 text-center text-gray-500 font-bold border-l border-bakery-border/30">{p.target_qty > 0 ? p.target_qty : '-'}</td>
 
-                                        {/* 総製造数の入力 */}
-                                        <td className="p-2 border-l border-bakery-border/30 bg-bakery-surface/20">
-                                            <div className="flex items-center justify-center gap-2">
-                                                <button onClick={() => handleTotalQtyChange(p.id, totalQty - 1)} className="w-8 h-8 bg-gray-200 rounded-full font-bold text-gray-600 hover:bg-gray-300">-</button>
-                                                <input type="number" min="0" value={totalQty || ''} onChange={e => handleTotalQtyChange(p.id, parseInt(e.target.value) || 0)} className="w-14 text-center font-bold text-lg border-b-2 border-transparent focus:border-bakery-gold outline-none bg-transparent text-bakery-primary" placeholder="0" />
-                                                <button onClick={() => handleTotalQtyChange(p.id, totalQty + 1)} className="w-8 h-8 bg-bakery-gold rounded-full font-bold text-white hover:bg-[#C4A882]">+</button>
-                                            </div>
-                                        </td>
-
-                                        {/* ショップ用の入力 */}
+                                        {/* ショップ用の入力（青っぽいエリア） */}
                                         <td className="p-2 border-l border-bakery-border/30 bg-blue-50/20">
                                             <div className="flex items-center justify-center gap-2">
                                                 <button onClick={() => handleShopQtyChange(p.id, shopQty - 1)} className="w-8 h-8 bg-gray-200 rounded-full font-bold text-gray-600 hover:bg-gray-300">-</button>
@@ -130,13 +129,43 @@ export default function Production() {
                                             </div>
                                         </td>
 
-                                        {/* 外部卸し分（自動計算で表示だけ） */}
-                                        <td className="p-3 text-center text-gray-500 font-bold border-l border-bakery-border/30 bg-gray-50/50">
-                                            {wholesaleQty > 0 ? wholesaleQty : '-'}
+                                        {/* その他用の入力（オレンジっぽいエリア） */}
+                                        <td className="p-2 border-l border-bakery-border/30 bg-orange-50/20">
+                                            <div className="flex items-center justify-center gap-2">
+                                                <button onClick={() => handleOtherQtyChange(p.id, otherQty - 1)} className="w-8 h-8 bg-gray-200 rounded-full font-bold text-gray-600 hover:bg-gray-300">-</button>
+                                                <input type="number" min="0" value={otherQty || ''} onChange={e => handleOtherQtyChange(p.id, parseInt(e.target.value) || 0)} className="w-14 text-center font-bold text-lg border-b-2 border-transparent focus:border-orange-400 outline-none bg-transparent text-orange-600" placeholder="0" />
+                                                <button onClick={() => handleOtherQtyChange(p.id, otherQty + 1)} className="w-8 h-8 bg-orange-400 rounded-full font-bold text-white hover:bg-orange-500">+</button>
+                                            </div>
+                                        </td>
+
+                                        {/* 合計数（自動計算で表示だけ） */}
+                                        <td className={`p-3 text-center font-bold text-lg border-l border-bakery-border/30 bg-bakery-surface/30 ${diffColor}`}>
+                                            {totalQty > 0 ? totalQty : '-'}
                                         </td>
                                     </tr>
                                 );
                             })}
+
+                            {/* ⭐️ 合計行 */}
+                            <tr className="bg-gray-100 font-bold border-t-2 border-bakery-border text-lg">
+                                <td className="p-3 text-center text-bakery-textMain" colSpan={2}>本日の製造 合計</td>
+
+                                {/* ショップ用製造数の合計 */}
+                                <td className="p-3 text-center text-blue-600 border-l border-bakery-border/30 bg-blue-50/50">
+                                    {Object.values(quantities).reduce((sum, q) => sum + (q.shop || 0), 0)} 個
+                                </td>
+
+                                {/* その他用の合計 */}
+                                <td className="p-3 text-center text-orange-600 border-l border-bakery-border/30 bg-orange-50/50">
+                                    {Object.values(quantities).reduce((sum, q) => sum + (q.other || 0), 0)} 個
+                                </td>
+
+                                {/* 全体の合計 */}
+                                <td className="p-3 text-center text-bakery-primary border-l border-bakery-border/30 bg-bakery-surface/50">
+                                    {Object.values(quantities).reduce((sum, q) => sum + ((q.shop || 0) + (q.other || 0)), 0)} 個
+                                </td>
+                            </tr>
+
                         </tbody>
                     </table>
                 </div>

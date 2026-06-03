@@ -10,6 +10,7 @@ import MobileCamera from './pages/MobileCamera';
 import Contact from './pages/Contact';
 import Production from './pages/Production'; // ⭐️ 追加
 import Manual from './pages/Manual';
+import Wholesale from './pages/Wholesale';
 
 export default function App() {
   return (
@@ -23,7 +24,8 @@ export default function App() {
           <Route path="/master" element={<Master />} />
           <Route path="/mobile" element={<MobileCamera />} />
           <Route path="/contact" element={<Contact />} />
-          <Route path="/production" element={<Production />} /> {/* ⭐️ 追加 */}
+          <Route path="/production" element={<Production />} />
+          <Route path="/wholesale" element={<Wholesale />} />
           <Route path="/manual" element={<Manual />} />
         </Routes>
       </Layout>

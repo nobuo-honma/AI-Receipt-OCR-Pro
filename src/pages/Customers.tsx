@@ -117,7 +117,10 @@ export default function Customers() {
 
     return (
         <>
-            <div className="print-only">
+            <style type="text/css" media="print">
+                {`@page { margin: 0 !important; }`}
+            </style>
+            <div className="label-print-only">
                 <div className="label-container">
                     {filteredCustomers.map(c => (
                         <div key={c.id} className="label-card">

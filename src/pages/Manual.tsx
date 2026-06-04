@@ -210,7 +210,9 @@ export default function Manual() {
 
     return (
         <div className="min-h-screen bg-[#FDF6E3] font-serif flex flex-col">
-
+            <style type="text/css" media="print">
+                {`@page { size: A4 portrait; margin: 15mm; }`}
+            </style>
             {/* ── カバーヘッダー ── */}
             <div className="bg-bakery-textMain text-[#FDF6E3] px-6 pt-12 pb-10 text-center relative overflow-hidden shrink-0">
                 <div className="absolute inset-0 bg-[repeating-linear-gradient(45deg,transparent,transparent_40px,rgba(212,169,106,0.04)_40px,rgba(212,169,106,0.04)_41px)]" />
@@ -245,10 +247,10 @@ export default function Manual() {
                 </nav>
 
                 {/* コンテンツ */}
-                <main className="flex-1 p-6 md:p-12 max-w-3xl mx-auto leading-relaxed print:p-0 print:max-w-full">
+                <main className="flex-1 p-6 md:p-12 max-w-3xl mx-auto leading-relaxed print:p-0 print:max-w-none print:w-full print:bg-white print:text-black">
 
                     {/* 印刷時のみ表示 */}
-                    <div className="hidden print-only mb-8 text-center text-xs text-gray-500 border-b border-gray-300 pb-2">
+                    <div className="hidden print:block mb-8 text-center text-xs text-gray-500 border-b border-gray-300 pb-2">
                         このマニュアルは店舗スタッフ向けの内部資料です。外部への持ち出しはご遠慮ください。
                     </div>
 
@@ -942,9 +944,9 @@ export default function Manual() {
                 </main>
             </div>
 
-            {/* 印刷フッター */}
-            <div className="hidden print-only text-center text-[10px] text-gray-400 py-4">
-                AI Bakery Manager Operations Manual - Confidential
+            {/* フッター */}
+            <div className="hidden print:block text-center text-[10px] text-gray-400 py-4">
+                © {new Date().getFullYear()} AI Bakery Manager. All Rights Reserved.
             </div>
         </div>
     );

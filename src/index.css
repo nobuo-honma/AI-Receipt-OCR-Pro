@@ -25,10 +25,6 @@ body {
    🖨️ 印刷用の特殊スタイル（宛名ラベル、月報、マニュアル対応）
    ──────────────────────────────────────────────────────── */
 @media print {
-  @page { 
-    /* 余白を強制的にゼロにして、ブラウザごとの印刷のズレを防ぐ */
-    margin: 0 !important; 
-  }
 
   body { 
     /* 印刷時はインク節約のために背景を真っ白にする */
@@ -44,7 +40,7 @@ body {
   }
 
   /* --- 宛名ラベル（Customers.tsx）印刷専用の設定 --- */
-  .print-only {
+  .label-print-only {
     display: block !important; 
     position: absolute; 
     top: 0; 
@@ -80,7 +76,7 @@ body {
 
 /* 画面で見ているときは、印刷専用のエリア（宛名ラベルなど）は隠しておく */
 @media screen { 
-  .print-only { 
+  .label-print-only { 
     display: none !important; 
   } 
 }

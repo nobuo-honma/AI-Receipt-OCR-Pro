@@ -15,7 +15,7 @@ serve(async (req: Request) => {
     const { imageBase64 } = await req.json()
     if (!imageBase64) throw new Error("画像データがありません。")
 
-    // 学習データ（過去の修正履歴）を取得してプロンプトに混ぜ込む（Few-Shot Learning）
+    // Supabaseへの接続と学習データ取得
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? ""
     const supabase = createClient(supabaseUrl, supabaseAnonKey)
@@ -32,9 +32,11 @@ serve(async (req: Request) => {
       });
     }
 
-    // ⭐️ 修正：Gemini 1.5 Flash に APIリクエストを送信
+    // Gemini API 呼び出し
     const apiKey = Deno.env.get("GEMINI_API_KEY") ?? ""
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
+    if (!apiKey) throw new Error("GEMINI_API_KEYが設定されていません。SupabaseのSecretsを確認してください。")
+
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`
 
     const systemPrompt = `あなたは優秀なレシート解析AIです。画像から商品名、単価、個数を抽出してください。
 単価は1個あたりの最終的な数値を計算して入れてください。
@@ -51,28 +53,37 @@ ${learningPrompt}
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: systemPrompt }, { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }] }],
-        // ⭐️ 魔法の設定：AIの出力形式を強制的に「JSON」に指定する！（これで余計な文字が絶対に出なくなります）
+        contents: [
+          {
+            parts: [
+              { text: systemPrompt },
+              { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
+            ]
+          }
+        ],
         generationConfig: {
           responseMimeType: "application/json"
         }
       })
     })
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Google API エラー: ${response.status} ${errorText}`);
+    }
 
     const aiData = await response.json()
     let rawAiText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    // 念のためのクレンジング（マークダウンのバッククォートを剥がす）
+    // クレンジング処理
     if (rawAiText.includes("```")) {
       rawAiText = rawAiText.replace(/```json/g, "").replace(/```/g, "")
     }
     rawAiText = rawAiText.trim()
 
-    // ⭐️ JSONの抽出をより強力に
+    // JSON抽出
     const jsonMatch = rawAiText.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
-      console.error("AIからの生データ:", rawAiText); // 何が返ってきたかログに残す
-      throw new Error("AIの応答から有効なJSON構造が検出されませんでした。");
+      throw new Error(`AIの応答から有効なJSON構造が検出されませんでした。\nAI応答: ${rawAiText}`);
     }
 
     const cleanJsonText = jsonMatch[0]
@@ -80,15 +91,23 @@ ${learningPrompt}
     try {
       parsedData = JSON.parse(cleanJsonText)
     } catch (parseErr) {
-      console.error("パース失敗したテキスト:", cleanJsonText);
-      throw new Error(`JSONパースエラー: AIの生成データが破損しています。`)
+      throw new Error(`JSONパースエラー: AIの生成データが破損しています。\nデータ: ${cleanJsonText}`)
     }
 
-    // 正常にパースできたらReactに返す
+    // 正常終了時は結果を返す
     return new Response(JSON.stringify(parsedData), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 })
 
-  } catch (error) {
-    console.error("Edge Function エラー:", error);
-    return new Response(JSON.stringify({ items: [], error: error instanceof Error ? error.message : "Internal Error" }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
+  } catch (error: any) {
+    console.error("🔥 Edge Function 内部エラー:", error);
+
+    // エラーが起きたら、必ず status: 200 でReactにエラーメッセージを届ける！
+    // (ここで 400 や 500 を返すと、React側でエラーの中身が読めなくなってしまうため)
+    return new Response(
+      JSON.stringify({
+        items: [],
+        error: error.message || "Unknown error"
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+    )
   }
 })

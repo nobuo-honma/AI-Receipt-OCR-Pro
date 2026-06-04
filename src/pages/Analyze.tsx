@@ -30,19 +30,17 @@ export default function Analyze() {
     const [imageBase64, setImageBase64] = useState<string | null>(null);
     const [showFilteredItems, setShowFilteredItems] = useState<boolean>(false);
 
-    // データベース連携用
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
     const [savedSessionId, setSavedSessionId] = useState<number | null>(null);
     const [isSaving, setIsSaving] = useState(false);
 
-    // ⭐️ 追加：売上日を手動で選択するためのステート（初期値は今日）
-    const [salesDate, setSalesDate] = useState(() => new Date().toISOString().split('T')[0]);
-
-    // カメラ・QR連携用
     const [showQrModal, setShowQrModal] = useState<boolean>(false);
-    const currentUrl = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}${import.meta.env.BASE_URL}` : '';
+
+    // ⭐️ 修正：エラーを回避するために現在のURLを安全に取得
+    const [currentUrl, setCurrentUrl] = useState<string>('');
+
     const [isCameraActive, setIsCameraActive] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -50,12 +48,19 @@ export default function Analyze() {
     const fileInputRefNormal = useRef<HTMLInputElement>(null);
 
     const stopCamera = useCallback(() => {
-        if (videoRef.current?.srcObject) { (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop()); videoRef.current.srcObject = null; }
+        if (videoRef.current?.srcObject) {
+            (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+            videoRef.current.srcObject = null;
+        }
         setIsCameraActive(false);
     }, []);
 
     // ── 初期化処理 ──
     useEffect(() => {
+        if (typeof window !== 'undefined') {
+            setCurrentUrl(`${window.location.protocol}//${window.location.host}${import.meta.env.BASE_URL}`);
+        }
+
         const fetchData = async () => {
             const { data: cData } = await supabase.from('customers').select('*').order('last_visit', { ascending: false });
             if (cData) setCustomers(cData);
@@ -76,7 +81,7 @@ export default function Analyze() {
         return () => { supabase.removeChannel(sub); stopCamera(); };
     }, [stopCamera]);
 
-    // ── 画像処理系 ──
+    // ── ⭐️ 画像処理系（超圧縮版） ──
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -88,7 +93,7 @@ export default function Analyze() {
             const img = new Image();
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_BOUND = 1500;
+                const MAX_BOUND = 1000; // データ量を大幅削減
                 let { width, height } = img;
                 if (width > height && width > MAX_BOUND) { height = Math.round((height * MAX_BOUND) / width); width = MAX_BOUND; }
                 else if (height > MAX_BOUND) { width = Math.round((width * MAX_BOUND) / height); height = MAX_BOUND; }
@@ -97,7 +102,7 @@ export default function Analyze() {
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
                     ctx.drawImage(img, 0, 0, width, height);
-                    setImageBase64(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
+                    setImageBase64(canvas.toDataURL('image/jpeg', 0.6).split(',')[1]); // 画質を下げて圧縮
                 }
             };
             img.src = event.target?.result as string;
@@ -105,7 +110,7 @@ export default function Analyze() {
         reader.readAsDataURL(file);
     };
 
-    // ── PCカメラ系 ──
+    // ── PCカメラ系（超圧縮版） ──
     const startCamera = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
@@ -116,10 +121,18 @@ export default function Analyze() {
     const capturePhoto = () => {
         if (!videoRef.current || !canvasRef.current) return;
         const ctx = canvasRef.current.getContext('2d');
-        canvasRef.current.width = videoRef.current.videoWidth; canvasRef.current.height = videoRef.current.videoHeight;
-        ctx?.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        const video = videoRef.current;
+        const MAX_BOUND = 1000;
+        let width = video.videoWidth;
+        let height = video.videoHeight;
 
-        const b64 = canvasRef.current.toDataURL('image/jpeg', 0.8).split(',')[1];
+        if (width > height && width > MAX_BOUND) { height = Math.round((height * MAX_BOUND) / width); width = MAX_BOUND; }
+        else if (height > MAX_BOUND) { width = Math.round((width * MAX_BOUND) / height); height = MAX_BOUND; }
+
+        canvasRef.current.width = width; canvasRef.current.height = height;
+        ctx?.drawImage(video, 0, 0, width, height);
+
+        const b64 = canvasRef.current.toDataURL('image/jpeg', 0.6).split(',')[1];
         setImageBase64(b64); setPreviewUrl(`data:image/jpeg;base64,${b64}`);
         setSavedSessionId(null); stopCamera();
     };
@@ -135,6 +148,7 @@ export default function Analyze() {
             if (data.error) throw new Error(data.error);
 
             let newItems = data.items || [];
+
             if (newItems.length === 0) {
                 alert("商品が読み取れませんでした。");
             } else {
@@ -174,8 +188,9 @@ export default function Analyze() {
                 setItems(Object.values(agg));
                 setSavedSessionId(null);
             }
-        } catch (err) {
-            console.error(err); alert("解析に失敗しました。");
+        } catch (err: any) {
+            console.error("解析通信エラー:", err);
+            alert(`【解析に失敗しました】\n${err.message || "APIキーや通信状況を確認してください。"}`);
         } finally { setLoading(false); }
     };
 
@@ -187,24 +202,14 @@ export default function Analyze() {
 
     // ── 保存・連携処理 ──
     const calculateTotal = () => items.filter(i => !i.is_filtered).reduce((sum, item) => sum + (item.price * item.qty), 0);
-
-    // ⭐️ 修正：保存する日時を「選択した売上日（salesDate）」＋「現在の時刻」にする
-    const getFormattedDate = () => {
-        const d = new Date();
-        const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
-        return `${salesDate} ${timeStr}`; // 選択した日付 + 今の時刻
-    };
+    const getFormattedDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`; };
 
     const handleSaveToDB = async () => {
         const savePayload = items.filter(item => !item.is_filtered);
         if (savePayload.length === 0 || isSaving) return alert("保存するデータがありません");
         setIsSaving(true);
         try {
-            const { data, error } = await supabase.from('scan_sessions').insert({
-                scanned_at: getFormattedDate(),
-                total_amt: calculateTotal()
-            }).select('id').single();
-
+            const { data, error } = await supabase.from('scan_sessions').insert({ scanned_at: getFormattedDate(), total_amt: calculateTotal() }).select('id').single();
             if (error || !data) throw error;
 
             await supabase.from('scan_items').insert(savePayload.map(i => ({
@@ -215,9 +220,7 @@ export default function Analyze() {
                 subtotal: i.price * i.qty,
                 category: CATEGORY_MAP[i.category_id] || i.category_id
             })));
-
-            setSavedSessionId(data.id);
-            alert(`ダッシュボードに【${salesDate}】の売上として保存しました！`);
+            setSavedSessionId(data.id); alert("ダッシュボードに売上を保存しました！");
         } catch { alert("保存に失敗しました"); } finally { setIsSaving(false); }
     };
 
@@ -225,18 +228,13 @@ export default function Analyze() {
         if (!selectedCustomerId || items.length === 0 || isSaving) return;
         setIsSaving(true);
         try {
-            const total = calculateTotal();
+            const total = calculateTotal(); const pts = Math.max(1, Math.floor(total * 0.01));
             const c = customers.find(c => c.id.toString() === selectedCustomerId);
             if (!c) return;
-
-            // ⭐️ ポイント (points_earned) を 0 として保存するように変更
-            await supabase.from('customer_purchases').insert({ customer_id: c.id, session_id: savedSessionId, purchased_at: getFormattedDate(), amount: total, points_earned: 0, memo: "AIレシート解析" });
-
-            // ⭐️ 顧客データの更新時も points の加算を削除
-            await supabase.from('customers').update({ total_spent: c.total_spent + total, visit_count: c.visit_count + 1 }).eq('id', c.id);
-
-            alert(`${c.name}さんの購買履歴として記録しました！`); setSelectedCustomerId("");
-        } catch { alert("履歴の紐付けに失敗しました"); } finally { setIsSaving(false); }
+            await supabase.from('customer_purchases').insert({ customer_id: c.id, session_id: savedSessionId, purchased_at: getFormattedDate(), amount: total, points_earned: pts, memo: "AIレシート解析" });
+            await supabase.from('customers').update({ total_spent: c.total_spent + total, points: c.points + pts, visit_count: c.visit_count + 1 }).eq('id', c.id);
+            alert(`${c.name}さんに ${pts}pt 付与しました！`); setSelectedCustomerId("");
+        } catch { alert("ポイント付与に失敗しました"); } finally { setIsSaving(false); }
     };
 
     const uniqueCategories = Array.from(new Set(products.map(p => p.category).filter(Boolean)));
@@ -281,19 +279,9 @@ export default function Analyze() {
 
             {/* ── 右カラム：解析結果と手動修正 ── */}
             <div className="w-full lg:w-8/12">
-                <div className="flex flex-col sm:flex-row justify-between items-end sm:items-center mb-6 border-b-2 border-bakery-border pb-4 gap-4">
+                <div className="flex justify-between items-center mb-6">
                     <h2 className="text-2xl font-bold text-bakery-textMain">📝 解析結果（手動修正）</h2>
-
-                    {/* ⭐️ 追加：売上日を選択するカレンダー */}
-                    <div className="flex items-center gap-3">
-                        <span className="font-bold text-[#8B6340] whitespace-nowrap">📅 売上日:</span>
-                        <input
-                            type="date"
-                            value={salesDate}
-                            onChange={e => setSalesDate(e.target.value)}
-                            className="p-2 border border-bakery-border rounded-lg font-bold outline-none focus:ring-2 focus:ring-bakery-gold bg-white shadow-sm text-bakery-textMain"
-                        />
-                    </div>
+                    {items.length > 0 && <button onClick={() => { if (window.confirm("クリアしますか？")) { setItems([]); setSavedSessionId(null); setImageBase64(null); setPreviewUrl(null); } }} className="text-sm text-bakery-danger border border-bakery-danger/30 bg-red-50 px-4 py-1.5 rounded font-bold shadow-sm hover:bg-red-100">🗑️ クリア</button>}
                 </div>
 
                 {items.length === 0 ? (
@@ -326,7 +314,7 @@ export default function Analyze() {
                                         if (item.is_filtered && !showFilteredItems) return null;
                                         return (
                                             <tr key={idx} className={`border-b border-gray-100 ${item.is_filtered ? 'bg-red-50' : 'hover:bg-[#FAFAFA]'}`}>
-                                                <td className="p-2"><input type="text" value={item.name} onChange={(e) => handleItemChange(idx, 'name', e.target.value)} className="w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none font-bold text-bakery-textMain" /></td>
+                                                <td className="p-2"><input type="text" value={item.name} onChange={(e) => handleItemChange(idx, 'name', e.target.value)} className="w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none" /></td>
                                                 <td className="p-2"><input type="number" value={item.price} onChange={(e) => handleItemChange(idx, 'price', Number(e.target.value))} className="w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none text-right" /></td>
                                                 <td className="p-2"><input type="number" value={item.qty} onChange={(e) => handleItemChange(idx, 'qty', Number(e.target.value))} className="w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none text-center" /></td>
                                                 <td className="p-2">
@@ -334,7 +322,11 @@ export default function Analyze() {
                                                         {uniqueCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                                                     </select>
                                                 </td>
-                                                <td className="p-2 text-center">{item.is_filtered ? <button onClick={() => handleItemChange(idx, 'is_filtered', false)} className="bg-red-500 text-white px-2 py-1 rounded text-xs shadow-sm">除外中</button> : <span className="text-green-600 font-bold text-xs">✓ 対象</span>}</td>
+                                                <td className="p-2 text-center">
+                                                    {item.is_filtered
+                                                        ? <button onClick={() => handleItemChange(idx, 'is_filtered', false)} className="bg-red-500 text-white px-2 py-1 rounded text-xs shadow-sm">除外中</button>
+                                                        : <span className="text-green-600 font-bold text-xs">✓ 対象</span>}
+                                                </td>
                                             </tr>
                                         );
                                     })}
@@ -346,19 +338,16 @@ export default function Analyze() {
                             <button onClick={handleSaveToDB} disabled={isSaving || savedSessionId !== null} className={`py-4 rounded-xl font-bold shadow-md transition-colors ${savedSessionId !== null ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-bakery-gold text-white hover:bg-[#C4A882]'}`}>
                                 {savedSessionId !== null ? '✅ 保存済み' : '💾 修正を確認して売上登録'}
                             </button>
+
                             <div className="bg-bakery-surface p-4 rounded-xl border border-bakery-border shadow-inner flex flex-col justify-center">
-                                <select value={selectedCustomerId} onChange={e => setSelectedCustomerId(e.target.value)} className="w-full p-2 border border-bakery-border rounded bg-white mb-2 text-sm font-bold text-[#8B6340] outline-none"><option value="">-- 顧客に紐付ける --</option>{customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                                <select value={selectedCustomerId} onChange={e => setSelectedCustomerId(e.target.value)} className="w-full p-2 border border-bakery-border rounded bg-white mb-2 text-sm font-bold text-[#8B6340] outline-none">
+                                    <option value="">-- 顧客に紐付ける --</option>
+                                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
                                 <button onClick={handleLinkCustomer} disabled={!selectedCustomerId || isSaving || !savedSessionId} className="w-full py-2 bg-bakery-primary text-white rounded font-bold text-sm disabled:opacity-50 hover:bg-[#8B5E3C]">
-                                    ⭐ お客様の購買履歴として記録
+                                    ⭐ 購買記録 & ポイント付与
                                 </button>
                             </div>
-                        </div>
-
-                        {/* ⭐️ 追加：クリアボタンを下にも配置 */}
-                        <div className="text-right">
-                            <button onClick={() => { if (window.confirm("クリアしますか？")) { setItems([]); setSavedSessionId(null); setImageBase64(null); setPreviewUrl(null); } }} className="text-sm text-bakery-danger border border-bakery-danger/30 bg-red-50 px-4 py-1.5 rounded font-bold shadow-sm hover:bg-red-100">
-                                🗑️ リストをクリア
-                            </button>
                         </div>
                     </div>
                 )}
@@ -370,7 +359,9 @@ export default function Analyze() {
                     <div className="bg-white p-8 rounded-2xl text-center max-w-sm w-full shadow-2xl animate-fade-in-up">
                         <h4 className="text-xl font-bold mb-2 text-bakery-textMain">📱 スマホで撮影</h4>
                         <p className="text-sm text-gray-500 mb-6">カメラでQRを読み取り、<br />直接撮影して転送してください</p>
-                        <div className="inline-block p-4 border-2 border-bakery-border rounded-xl bg-bakery-surface mb-6"><QRCodeSVG value={`${currentUrl}#/mobile`} size={200} /></div>
+                        <div className="inline-block p-4 border-2 border-bakery-border rounded-xl bg-bakery-surface mb-6">
+                            <QRCodeSVG value={`${currentUrl}#/mobile`} size={200} />
+                        </div>
                         <button onClick={() => setShowQrModal(false)} className="w-full py-3 bg-gray-200 text-gray-800 font-bold rounded-xl hover:bg-gray-300">閉じる</button>
                     </div>
                 </div>

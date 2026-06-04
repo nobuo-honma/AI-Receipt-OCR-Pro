@@ -225,13 +225,18 @@ export default function Analyze() {
         if (!selectedCustomerId || items.length === 0 || isSaving) return;
         setIsSaving(true);
         try {
-            const total = calculateTotal(); const pts = Math.max(1, Math.floor(total * 0.01));
+            const total = calculateTotal();
             const c = customers.find(c => c.id.toString() === selectedCustomerId);
             if (!c) return;
-            await supabase.from('customer_purchases').insert({ customer_id: c.id, session_id: savedSessionId, purchased_at: getFormattedDate(), amount: total, points_earned: pts, memo: "AIレシート解析" });
-            await supabase.from('customers').update({ total_spent: c.total_spent + total, points: c.points + pts, visit_count: c.visit_count + 1, first_visit: c.first_visit || salesDate, last_visit: salesDate }).eq('id', c.id);
-            alert(`【成功】 ${c.name}さんに ${pts}pt 付与しました！`); setSelectedCustomerId("");
-        } catch { alert("ポイント付与に失敗しました"); } finally { setIsSaving(false); }
+
+            // ⭐️ ポイント (points_earned) を 0 として保存するように変更
+            await supabase.from('customer_purchases').insert({ customer_id: c.id, session_id: savedSessionId, purchased_at: getFormattedDate(), amount: total, points_earned: 0, memo: "AIレシート解析" });
+
+            // ⭐️ 顧客データの更新時も points の加算を削除
+            await supabase.from('customers').update({ total_spent: c.total_spent + total, visit_count: c.visit_count + 1 }).eq('id', c.id);
+
+            alert(`${c.name}さんの購買履歴として記録しました！`); setSelectedCustomerId("");
+        } catch { alert("履歴の紐付けに失敗しました"); } finally { setIsSaving(false); }
     };
 
     const uniqueCategories = Array.from(new Set(products.map(p => p.category).filter(Boolean)));
@@ -343,7 +348,9 @@ export default function Analyze() {
                             </button>
                             <div className="bg-bakery-surface p-4 rounded-xl border border-bakery-border shadow-inner flex flex-col justify-center">
                                 <select value={selectedCustomerId} onChange={e => setSelectedCustomerId(e.target.value)} className="w-full p-2 border border-bakery-border rounded bg-white mb-2 text-sm font-bold text-[#8B6340] outline-none"><option value="">-- 顧客に紐付ける --</option>{customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-                                <button onClick={handleLinkCustomer} disabled={!selectedCustomerId || isSaving || !savedSessionId} className="w-full py-2 bg-bakery-primary text-white rounded font-bold text-sm disabled:opacity-50 hover:bg-[#8B5E3C]">⭐ 購買記録 & ポイント付与</button>
+                                <button onClick={handleLinkCustomer} disabled={!selectedCustomerId || isSaving || !savedSessionId} className="w-full py-2 bg-bakery-primary text-white rounded font-bold text-sm disabled:opacity-50 hover:bg-[#8B5E3C]">
+                                    ⭐ お客様の購買履歴として記録
+                                </button>
                             </div>
                         </div>
 

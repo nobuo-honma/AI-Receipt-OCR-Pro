@@ -11,16 +11,17 @@ export default function Dashboard() {
 
   const [ranking, setRanking] = useState<{ name: string, category: string, totalSales: number, totalQty: number }[]>([]);
   const [dailyData, setDailyData] = useState<{ dates: string[], items: Record<string, { category: string, dateMap: Record<string, number> }> }>({ dates: [], items: {} });
+
+  // ダッシュボードの期間指定
   const [startDate, setStartDate] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]; });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   const [filterText, setFilterText] = useState("");
-
-  // ⭐️ 複数カテゴリ選択用のステートとUI制御
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // 月報の期間指定
   const [reportMonth, setReportMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
   const [products, setProducts] = useState<Product[]>([]);
 
@@ -29,7 +30,6 @@ export default function Dashboard() {
   const [shopProdMatrix, setShopProdMatrix] = useState<Record<string, Record<number, number>>>({});
   const [wholesaleProdMatrix, setWholesaleProdMatrix] = useState<Record<string, Record<number, number>>>({});
 
-  // プルダウンを外側クリックで閉じる処理
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsCategoryDropdownOpen(false);
@@ -71,31 +71,31 @@ export default function Dashboard() {
 
     const [year, month] = reportMonth.split('-');
     const lastDay = new Date(Number(year), Number(month), 0).getDate();
-    const startStr = `${reportMonth}-01 00:00:00`;
-    const endStr = `${reportMonth}-${lastDay} 23:59:59`;
+    const startStr = `${reportMonth}-01`;
+    const endStr = `${reportMonth}-${lastDay}`;
 
-    const { data: sessionData } = await supabase.from('scan_sessions').select('id, scanned_at, sales_type').gte('scanned_at', startStr).lte('scanned_at', endStr);
-    // 1. ショップ販売実績（scan_items）の取得
+    const { data: sessionData } = await supabase.from('scan_sessions').select('id, scanned_at, sales_type').gte('scanned_at', `${startStr} 00:00:00`).lte('scanned_at', `${endStr} 23:59:59`);
     const sShopMatrix: Record<string, Record<number, number>> = {};
+    const sWholesaleMatrix: Record<string, Record<number, number>> = {};
 
-    // ※今回は全ての売上をショップ販売として計算のベースにします
     if (sessionData && sessionData.length > 0) {
-      const sessionMap: Record<number, { day: number }> = {};
-      sessionData.forEach(s => { sessionMap[s.id] = { day: parseInt(s.scanned_at.split(' ')[0].split('-')[2], 10) }; });
-
+      const sessionMap: Record<number, { day: number, type: string }> = {};
+      sessionData.forEach(s => { sessionMap[s.id] = { day: parseInt(s.scanned_at.split(' ')[0].split('-')[2], 10), type: s.sales_type || 'shop' }; });
       const { data: itemsData } = await supabase.from('scan_items').select('session_id, name, quantity').in('session_id', sessionData.map(s => s.id));
       if (itemsData) {
         itemsData.forEach(item => {
           const sInfo = sessionMap[item.session_id];
-          if (!sShopMatrix[item.name]) sShopMatrix[item.name] = {};
-          if (!sShopMatrix[item.name][sInfo.day]) sShopMatrix[item.name][sInfo.day] = 0;
-          sShopMatrix[item.name][sInfo.day] += item.quantity;
+          const targetMatrix = sInfo.type === 'wholesale' ? sWholesaleMatrix : sShopMatrix;
+          if (!targetMatrix[item.name]) targetMatrix[item.name] = {};
+          if (!targetMatrix[item.name][sInfo.day]) targetMatrix[item.name][sInfo.day] = 0;
+          targetMatrix[item.name][sInfo.day] += item.quantity;
         });
       }
     }
     setShopSalesMatrix(sShopMatrix);
+    setWholesaleSalesMatrix(sWholesaleMatrix);
 
-    const { data: prodData } = await supabase.from('production_records').select('*').gte('production_date', `${reportMonth}-01`).lte('production_date', `${reportMonth}-${lastDay}`);
+    const { data: prodData } = await supabase.from('production_records').select('*').gte('production_date', startStr).lte('production_date', endStr);
     const pShopMatrix: Record<string, Record<number, number>> = {};
     const pWholesaleMatrix: Record<string, Record<number, number>> = {};
 
@@ -106,10 +106,8 @@ export default function Dashboard() {
         if (pName) {
           const shopQty = record.shop_quantity || 0;
           const wholesaleQty = (record.quantity || 0) - shopQty;
-
           if (!pShopMatrix[pName]) pShopMatrix[pName] = {};
           pShopMatrix[pName][day] = shopQty;
-
           if (!pWholesaleMatrix[pName]) pWholesaleMatrix[pName] = {};
           pWholesaleMatrix[pName][day] = wholesaleQty;
         }
@@ -117,40 +115,49 @@ export default function Dashboard() {
     }
     setShopProdMatrix(pShopMatrix);
     setWholesaleProdMatrix(pWholesaleMatrix);
-
-    // ⭐️ 3. 施設買上（販売実績）の自動計算
-    // ルール：「ショップ用製造数」から「ショップ販売数」を引いた残りを、施設が買い上げたものとする
-    const sWholesaleAutoMatrix: Record<string, Record<number, number>> = {};
-
-    if (pData) {
-      pData.forEach(p => {
-        sWholesaleAutoMatrix[p.name] = {};
-        for (let day = 1; day <= lastDay; day++) {
-          const prodQty = pShopMatrix[p.name]?.[day] || 0;    // ショップ用に作った数
-          const salesQty = sShopMatrix[p.name]?.[day] || 0;   // ショップで実際に売れた数
-
-          // 余った数（作った数 - 売れた数）を計算
-          // ※もし売りすぎた場合（マイナス）は 0 にする
-          const leftover = Math.max(0, prodQty - salesQty);
-
-          if (leftover > 0) {
-            sWholesaleAutoMatrix[p.name][day] = leftover;
-          }
-        }
-      });
-    }
-    setWholesaleSalesMatrix(sWholesaleAutoMatrix);
   };
 
   useEffect(() => { if (activeTab === 'dashboard') fetchDashboardData(); }, [startDate, endDate, activeTab]);
   useEffect(() => { if (activeTab !== 'dashboard') fetchMonthlyReportData(); }, [reportMonth, activeTab]);
 
-  const handleDeleteAll = async () => {
-    if (window.confirm("本当に全ての履歴を削除しますか？\n（※顧客データは消えません）")) {
-      await supabase.from('scan_items').delete().neq('id', 0);
-      await supabase.from('scan_sessions').delete().neq('id', 0);
-      await supabase.from('production_records').delete().neq('id', 0);
-      fetchDashboardData(); fetchMonthlyReportData();
+  // ⭐️ 新規：ダッシュボードで「指定した日付の期間」を一括削除する機能
+  const handleDeleteByDateRange = async () => {
+    if (window.confirm(`【警告】\n${startDate} 〜 ${endDate} の間の「売上履歴」と「製造実績」を全て削除しますか？\n（※顧客データは消えません）`)) {
+      try {
+        const { data: sessionData } = await supabase.from('scan_sessions').select('id').gte('scanned_at', `${startDate} 00:00:00`).lte('scanned_at', `${endDate} 23:59:59`);
+        if (sessionData && sessionData.length > 0) {
+          const sessionIds = sessionData.map(s => s.id);
+          await supabase.from('scan_items').delete().in('session_id', sessionIds);
+          await supabase.from('scan_sessions').delete().in('id', sessionIds);
+        }
+        await supabase.from('production_records').delete().gte('production_date', startDate).lte('production_date', endDate);
+
+        alert("指定期間のデータを全て削除しました。");
+        fetchDashboardData();
+      } catch (err: any) { alert("削除に失敗しました: " + err.message); }
+    }
+  };
+
+  // ⭐️ 新規：月報画面で「指定した月」のデータを一括削除する機能
+  const handleDeleteByMonth = async () => {
+    if (window.confirm(`【警告】\n${reportMonth}月 の「売上履歴」と「製造実績」を全て削除しますか？\n（※顧客データは消えません）`)) {
+      try {
+        const [year, month] = reportMonth.split('-');
+        const lastDay = new Date(Number(year), Number(month), 0).getDate();
+        const startStr = `${reportMonth}-01`;
+        const endStr = `${reportMonth}-${lastDay}`;
+
+        const { data: sessionData } = await supabase.from('scan_sessions').select('id').gte('scanned_at', `${startStr} 00:00:00`).lte('scanned_at', `${endStr} 23:59:59`);
+        if (sessionData && sessionData.length > 0) {
+          const sessionIds = sessionData.map(s => s.id);
+          await supabase.from('scan_items').delete().in('session_id', sessionIds);
+          await supabase.from('scan_sessions').delete().in('id', sessionIds);
+        }
+        await supabase.from('production_records').delete().gte('production_date', startStr).lte('production_date', endStr);
+
+        alert(`${reportMonth}月のデータを全て削除しました。`);
+        fetchMonthlyReportData();
+      } catch (err: any) { alert("削除に失敗しました: " + err.message); }
     }
   };
 
@@ -206,25 +213,14 @@ export default function Dashboard() {
   });
   const sortedProdCategoryKeys = Object.keys(groupedProducts).sort();
 
-  const renderSingleReportTable = (
-    title: string,
-    subTitle: string,
-    matrixData: Record<string, Record<number, number>>,
-    isSales: boolean
-  ) => {
+  const renderSingleReportTable = (title: string, subTitle: string, matrixData: Record<string, Record<number, number>>, isSales: boolean) => {
     const dailyTotals: Record<number, number> = {};
     let grandTotalQty = 0; let grandTotalPrice = 0;
 
     filteredProducts.forEach(p => {
       let pQty = 0;
-      daysArray.forEach(d => {
-        const qty = matrixData[p.name]?.[d] || 0;
-        if (!dailyTotals[d]) dailyTotals[d] = 0;
-        dailyTotals[d] += qty;
-        pQty += qty;
-      });
-      grandTotalQty += pQty;
-      grandTotalPrice += pQty * p.price;
+      daysArray.forEach(d => { const qty = matrixData[p.name]?.[d] || 0; if (!dailyTotals[d]) dailyTotals[d] = 0; dailyTotals[d] += qty; pQty += qty; });
+      grandTotalQty += pQty; grandTotalPrice += pQty * p.price;
     });
 
     return (
@@ -265,10 +261,7 @@ export default function Dashboard() {
                   <tr key={p.id} className="hover:bg-gray-50">
                     <td className="border border-black p-1 truncate max-w-[140px] pl-4 font-bold text-bakery-textMain">└ {p.name}</td>
                     <td className="border border-black p-1 text-right pr-1">{p.price}</td>
-                    {daysArray.map(d => {
-                      const qty = matrixData[p.name]?.[d] || 0;
-                      return <td key={d} className={`border border-black p-0.5 text-right pr-1 ${qty === 0 ? 'text-transparent' : 'font-bold'}`}>{qty > 0 ? qty : ''}</td>;
-                    })}
+                    {daysArray.map(d => { const qty = matrixData[p.name]?.[d] || 0; return <td key={d} className={`border border-black p-0.5 text-right pr-1 ${qty === 0 ? 'text-transparent' : 'font-bold'}`}>{qty > 0 ? qty : ''}</td>; })}
                     <td className="border border-black p-1 text-right pr-1 font-bold text-bakery-primary">{rowTotal}</td>
                     {isSales && <td className="border border-black p-1 text-right pr-1 font-bold text-bakery-primary">{(rowTotal * p.price).toLocaleString()}</td>}
                   </tr>
@@ -279,16 +272,11 @@ export default function Dashboard() {
 
               return (
                 <React.Fragment key={cat}>
-                  <tr className="bg-bakery-bg">
-                    <td className="border border-black p-1 font-bold text-bakery-primary" colSpan={isSales ? daysArray.length + 4 : daysArray.length + 3}>
-                      📂 {cat}
-                    </td>
-                  </tr>
+                  <tr className="bg-bakery-bg"><td className="border border-black p-1 font-bold text-bakery-primary" colSpan={isSales ? daysArray.length + 4 : daysArray.length + 3}>📂 {cat}</td></tr>
                   {catRows}
                 </React.Fragment>
               );
             })}
-
             <tr className="bg-gray-100 font-bold border-t-2 border-black">
               <td className="border border-black p-1 text-center" colSpan={2}>合　計</td>
               {daysArray.map(d => <td key={d} className={`border border-black p-0.5 text-right pr-1 ${dailyTotals[d] === 0 ? 'text-transparent' : ''}`}>{dailyTotals[d] || ''}</td>)}
@@ -308,45 +296,40 @@ export default function Dashboard() {
         <div className="relative" ref={dropdownRef}>
           <div className="flex items-center gap-2">
             <span className="font-bold text-bakery-textMain whitespace-nowrap">🔍 カテゴリ :</span>
-            <button
-              onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
-              className="p-2 border border-bakery-border rounded bg-bakery-bg focus:ring-2 focus:ring-bakery-gold min-w-[160px] text-left flex justify-between items-center"
-            >
-              <span className="truncate max-w-[120px]">
-                {selectedCategories.length === 0 ? "すべて" : `${selectedCategories.length}件 選択中`}
-              </span>
-              <span className="text-xs">▼</span>
+            <button onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)} className="p-2 border border-bakery-border rounded bg-bakery-bg focus:ring-2 focus:ring-bakery-gold min-w-[160px] text-left flex justify-between items-center">
+              <span className="truncate max-w-[120px]">{selectedCategories.length === 0 ? "すべて" : `${selectedCategories.length}件 選択中`}</span><span className="text-xs">▼</span>
             </button>
           </div>
-
           {isCategoryDropdownOpen && (
             <div className="absolute top-full left-16 mt-1 w-64 bg-white border border-bakery-border rounded-lg shadow-xl z-50 p-3 flex flex-col gap-2 max-h-60 overflow-y-auto">
-              <label className="flex items-center gap-2 cursor-pointer pb-2 border-b border-gray-100">
-                <input type="checkbox" checked={selectedCategories.length === 0} onChange={() => setSelectedCategories([])} className="w-4 h-4 text-bakery-primary rounded focus:ring-bakery-gold" />
-                <span className="font-bold text-bakery-textMain">すべて（絞り込み解除）</span>
-              </label>
+              <label className="flex items-center gap-2 cursor-pointer pb-2 border-b border-gray-100"><input type="checkbox" checked={selectedCategories.length === 0} onChange={() => setSelectedCategories([])} className="w-4 h-4 text-bakery-primary rounded focus:ring-bakery-gold" /><span className="font-bold text-bakery-textMain">すべて（絞り込み解除）</span></label>
               {uniqueCategories.map(cat => (
-                <label key={cat} className="flex items-center gap-2 cursor-pointer hover:bg-bakery-surface p-1 rounded">
-                  <input type="checkbox" checked={selectedCategories.includes(cat)} onChange={() => toggleCategory(cat)} className="w-4 h-4 text-bakery-primary rounded focus:ring-bakery-gold" />
-                  <span className="text-sm">{cat}</span>
-                </label>
+                <label key={cat} className="flex items-center gap-2 cursor-pointer hover:bg-bakery-surface p-1 rounded"><input type="checkbox" checked={selectedCategories.includes(cat)} onChange={() => toggleCategory(cat)} className="w-4 h-4 text-bakery-primary rounded focus:ring-bakery-gold" /><span className="text-sm">{cat}</span></label>
               ))}
             </div>
           )}
         </div>
-
-        <div className="w-full sm:w-auto flex items-center gap-2">
-          <span className="font-bold text-bakery-textMain whitespace-nowrap">品名 :</span>
-          <input type="text" placeholder="名前で検索..." value={filterText} onChange={e => setFilterText(e.target.value)} className="w-full p-2 border border-bakery-border rounded bg-bakery-bg outline-none focus:ring-2 focus:ring-bakery-gold" />
-        </div>
+        <div className="w-full sm:w-auto flex items-center gap-2"><span className="font-bold text-bakery-textMain whitespace-nowrap">品名 :</span><input type="text" placeholder="名前で検索..." value={filterText} onChange={e => setFilterText(e.target.value)} className="w-full p-2 border border-bakery-border rounded bg-bakery-bg outline-none focus:ring-2 focus:ring-bakery-gold" /></div>
       </div>
-
       <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-        <span className="font-bold text-bakery-textMain whitespace-nowrap">📅 対象{activeTab === 'dashboard' ? '期間' : '月'} :</span>
         {activeTab === 'dashboard' ? (
-          <><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border border-bakery-border rounded bg-bakery-bg outline-none" /><span className="font-bold text-[#8B6340]">〜</span><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border border-bakery-border rounded bg-bakery-bg outline-none" /></>
+          <>
+            <span className="font-bold text-bakery-textMain whitespace-nowrap">📅 集計期間 :</span>
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border border-bakery-border rounded bg-bakery-bg outline-none" /><span className="font-bold text-[#8B6340]">〜</span><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border border-bakery-border rounded bg-bakery-bg outline-none" />
+            {/* ⭐️ ダッシュボード：期間指定削除ボタン */}
+            <button onClick={handleDeleteByDateRange} className="ml-2 bg-white border border-red-300 text-red-500 hover:bg-red-50 px-3 py-2 rounded-md font-bold text-xs shadow-sm transition-colors whitespace-nowrap">
+              🗑️ この期間のデータを削除
+            </button>
+          </>
         ) : (
-          <input type="month" value={reportMonth} onChange={e => setReportMonth(e.target.value)} className="p-2 border border-bakery-border rounded bg-bakery-bg font-bold outline-none" />
+          <>
+            <span className="font-bold text-bakery-textMain whitespace-nowrap">📅 対象月 :</span>
+            <input type="month" value={reportMonth} onChange={e => setReportMonth(e.target.value)} className="p-2 border border-bakery-border rounded bg-bakery-bg font-bold outline-none" />
+            {/* ⭐️ 月報：月間指定削除ボタン */}
+            <button onClick={handleDeleteByMonth} className="ml-2 bg-white border border-red-300 text-red-500 hover:bg-red-50 px-3 py-2 rounded-md font-bold text-xs shadow-sm transition-colors whitespace-nowrap">
+              🗑️ この月のデータを削除
+            </button>
+          </>
         )}
       </div>
     </div>
@@ -414,18 +397,12 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ⭐️ 新規追加：4つの月報 */}
       {activeTab !== 'dashboard' && (
         <div className="animate-fade-in-up">
-          <div className="no-print bg-white p-4 rounded-xl border border-bakery-border shadow-sm mb-6 flex items-center justify-between">
-            <div className="flex items-center gap-4"><span className="font-bold">📅 対象月 :</span><input type="month" value={reportMonth} onChange={e => setReportMonth(e.target.value)} className="p-2 border rounded bg-bakery-bg font-bold outline-none" /></div>
-          </div>
-
-          {/* 💡 第4引数を全て `true` に変更し、製造実績表でも金額列が表示されるようにしました！ */}
-          {activeTab === 'prod_shop' && renderSingleReportTable('ショップ用 製造実績表', '厨房提出用', shopProdMatrix, true)}
+          {activeTab === 'prod_shop' && renderSingleReportTable('ショップ用 製造実績表', '厨房提出用', shopProdMatrix, false)}
           {activeTab === 'sales_shop' && renderSingleReportTable('ショップ用 販売実績表', '店舗用', shopSalesMatrix, true)}
-          {activeTab === 'prod_wholesale' && renderSingleReportTable('施設買上用 製造実績表', '厨房提出用', wholesaleProdMatrix, true)}
-          {activeTab === 'sales_wholesale' && renderSingleReportTable('施設買上用 販売実績表', '自動計算 (ショップ製造数 - ショップ販売数)', wholesaleSalesMatrix, true)}
+          {activeTab === 'prod_wholesale' && renderSingleReportTable('施設買上用 製造実績表', '厨房提出用', wholesaleProdMatrix, false)}
+          {activeTab === 'sales_wholesale' && renderSingleReportTable('施設買上用 販売実績表', '店舗用', wholesaleSalesMatrix, true)}
         </div>
       )}
     </div>

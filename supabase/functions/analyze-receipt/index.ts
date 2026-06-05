@@ -8,7 +8,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-// ⭐️ 新規追加：弾かれても諦めずに何度もアタックする「自動リトライ関数」
+// ⭐️ 自動リトライ関数（混雑時 503 などで弾かれても最大4回まで諦めずにアタックする）
 const fetchWithRetry = async (url: string, options: any, maxRetries = 4) => {
   for (let i = 0; i < maxRetries; i++) {
     const response = await fetch(url, options);
@@ -24,12 +24,11 @@ const fetchWithRetry = async (url: string, options: any, maxRetries = 4) => {
         throw new Error(`Google API エラー: ${response.status} ${errorText}`);
       }
       console.log(`⚠️ Googleサーバー混雑中(${response.status})。${i + 1}回目の再試行を待機します...`);
-      // 1回目は1秒、2回目は2秒、3回目は4秒...と徐々に待つ時間を延ばして再アタックする
-      await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+      await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i))); // 1秒, 2秒, 4秒と待つ
       continue;
     }
 
-    // それ以外の致命的なエラー（パスワード間違いなど）はすぐに諦める
+    // それ以外の致命的なエラーはすぐに諦める
     throw new Error(`Google API エラー: ${response.status} ${errorText}`);
   }
 }
@@ -58,15 +57,15 @@ serve(async (req: Request) => {
       });
     }
 
-    // Gemini API 呼び出し (最新の gemini-1.5-flash)
     const apiKey = Deno.env.get("GEMINI_API_KEY") ?? ""
     if (!apiKey) throw new Error("GEMINI_API_KEYが設定されていません。")
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
+    // ⭐️ 修正1：確実に動く「gemini-pro-vision」に戻す
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key=${apiKey}`
 
     const systemPrompt = `あなたは優秀なレシート解析AIです。画像から商品名、単価、個数を抽出してください。
 単価は1個あたりの最終的な数値を計算して入れてください。
-出力は【必ず】以下のJSONフォーマットのみにしてください。マークダウンや解説は一切不要です。
+出力は【必ず】以下のJSONフォーマットのみにしてください。マークダウンや挨拶、解説は一切不要です。
 ${learningPrompt}
 
 {
@@ -75,22 +74,26 @@ ${learningPrompt}
   ]
 }`
 
-    // ⭐️ 修正：普通の fetch ではなく、自作した fetchWithRetry を使って呼び出す！
+    // ⭐️ 修正2：pro-vision は JSON強制設定(generationConfig) に未対応のため、外してシンプルに送る！
     const response = await fetchWithRetry(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: systemPrompt }, { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }] }],
-        generationConfig: {
-          responseMimeType: "application/json"
-        }
+        contents: [
+          {
+            parts: [
+              { text: systemPrompt },
+              { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
+            ]
+          }
+        ]
       })
     })
 
     const aiData = await (response as Response).json()
     let rawAiText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    // クレンジング処理
+    // クレンジング処理（マークダウンブロックを剥がす）
     if (rawAiText.includes("```")) {
       rawAiText = rawAiText.replace(/```json/g, "").replace(/```/g, "")
     }

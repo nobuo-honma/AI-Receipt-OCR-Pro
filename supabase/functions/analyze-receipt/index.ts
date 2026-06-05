@@ -8,26 +8,21 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-// ⭐️ 自動リトライ関数（混雑時 503 などで弾かれても最大4回まで諦めずにアタックする）
+// ⭐️ 自動リトライ関数（503混雑エラーが出ても、最大4回まで諦めずにアタックする）
 const fetchWithRetry = async (url: string, options: any, maxRetries = 4) => {
   for (let i = 0; i < maxRetries; i++) {
     const response = await fetch(url, options);
-
-    // 成功したらそのまま返す
     if (response.ok) return response;
 
     const errorText = await response.text();
 
     // 503(混雑) または 429(リクエスト過多) の場合のみ、少し待ってから再チャレンジ！
     if (response.status === 503 || response.status === 429) {
-      if (i === maxRetries - 1) {
-        throw new Error(`Google API エラー: ${response.status} ${errorText}`);
-      }
+      if (i === maxRetries - 1) throw new Error(`Google API エラー: ${response.status} ${errorText}`);
       console.log(`⚠️ Googleサーバー混雑中(${response.status})。${i + 1}回目の再試行を待機します...`);
       await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i))); // 1秒, 2秒, 4秒と待つ
       continue;
     }
-
     // それ以外の致命的なエラーはすぐに諦める
     throw new Error(`Google API エラー: ${response.status} ${errorText}`);
   }
@@ -60,8 +55,8 @@ serve(async (req: Request) => {
     const apiKey = Deno.env.get("GEMINI_API_KEY") ?? ""
     if (!apiKey) throw new Error("GEMINI_API_KEYが設定されていません。")
 
-    // ⭐️ 修正1：確実に動く「gemini-pro-vision」に戻す
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key=${apiKey}`
+    // ⭐️ 修正：正しい最新モデル「gemini-1.5-flash」に戻す！
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
 
     const systemPrompt = `あなたは優秀なレシート解析AIです。画像から商品名、単価、個数を抽出してください。
 単価は1個あたりの最終的な数値を計算して入れてください。
@@ -74,7 +69,7 @@ ${learningPrompt}
   ]
 }`
 
-    // ⭐️ 修正2：pro-vision は JSON強制設定(generationConfig) に未対応のため、外してシンプルに送る！
+    // ⭐️ 修正：1.5-flashは JSON強制モード(generationConfig) に対応しているので復活させる！
     const response = await fetchWithRetry(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -86,20 +81,21 @@ ${learningPrompt}
               { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
             ]
           }
-        ]
+        ],
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
       })
     })
 
     const aiData = await (response as Response).json()
     let rawAiText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    // クレンジング処理（マークダウンブロックを剥がす）
     if (rawAiText.includes("```")) {
       rawAiText = rawAiText.replace(/```json/g, "").replace(/```/g, "")
     }
     rawAiText = rawAiText.trim()
 
-    // JSON抽出
     const jsonMatch = rawAiText.match(/\{[\s\S]*\}/)
     if (!jsonMatch) throw new Error(`AIの応答から有効なJSON構造が検出されませんでした。\nAI応答: ${rawAiText}`);
 

@@ -1,46 +1,41 @@
+/* src/index.css */
 @import url('https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
-@import "tailwindcss";
 
-@theme {
-  --font-zen: "Zen Kaku Gothic New", sans-serif;
-  --font-playfair: "Playfair Display", serif;
+/* ⭐️ Tailwind v3 の正しい読み込み方 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  --color-bakery-bg: #F5EDD6;
-  --color-bakery-surface: #FDF0D5;
-  --color-bakery-border: #E0C898;
-  --color-bakery-textMain: #3D2B1F;
-  --color-bakery-primary: #6B4226;
-  --color-bakery-gold: #D4A96A;
-  --color-bakery-danger: #C0392B;
-}
-
-body {
-  background-color: var(--color-bakery-bg);
-  font-family: var(--font-zen);
-  /* うっすらとした背景パターンを追加 */
-  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23C4A882' fill-opacity='0.07'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/svg%3E");
+/* ⭐️ アプリ全体の土台（body）設定 */
+@layer base {
+  body {
+    @apply font-zen text-bakery-textMain bg-bakery-bg antialiased;
+    /* うっすらとした背景パターンを追加 */
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23C4A882' fill-opacity='0.07'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/svg%3E");
+  }
 }
 
 /* ────────────────────────────────────────────────────────
    🖨️ 印刷用の特殊スタイル（宛名ラベル、月報、マニュアル対応）
    ──────────────────────────────────────────────────────── */
 @media print {
+  @page { 
+    margin: 0 !important; 
+  }
 
   body { 
-    /* 印刷時はインク節約のために背景を真っ白にする */
     background: white !important; 
     color: black !important; 
     margin: 0 !important; 
     padding: 0 !important; 
   }
   
-  /* ⭐️ 重要: これがあることで、メニューやボタンが印刷時に一斉に消え去ります！ */
   .no-print, .print\:hidden { 
     display: none !important; 
   }
 
-  /* --- 宛名ラベル（Customers.tsx）印刷専用の設定 --- */
-  .label-print-only {
+  /* --- 宛名ラベル印刷専用の設定 --- */
+  .print-only {
     display: block !important; 
     position: absolute; 
     top: 0; 
@@ -49,7 +44,6 @@ body {
     height: 297mm !important; 
     margin: 0 !important; 
     padding: 0 !important;
-    /* A-oneの21面シール（上下余白約21.2mm）に合わせた調整 */
     padding-top: 21.2mm !important; 
     box-sizing: border-box;
   }
@@ -74,9 +68,8 @@ body {
   }
 }
 
-/* 画面で見ているときは、印刷専用のエリア（宛名ラベルなど）は隠しておく */
 @media screen { 
-  .label-print-only { 
+  .print-only { 
     display: none !important; 
   } 
 }

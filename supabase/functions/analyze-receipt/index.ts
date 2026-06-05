@@ -8,6 +8,32 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
+// ⭐️ 新規追加：弾かれても諦めずに何度もアタックする「自動リトライ関数」
+const fetchWithRetry = async (url: string, options: any, maxRetries = 4) => {
+  for (let i = 0; i < maxRetries; i++) {
+    const response = await fetch(url, options);
+
+    // 成功したらそのまま返す
+    if (response.ok) return response;
+
+    const errorText = await response.text();
+
+    // 503(混雑) または 429(リクエスト過多) の場合のみ、少し待ってから再チャレンジ！
+    if (response.status === 503 || response.status === 429) {
+      if (i === maxRetries - 1) {
+        throw new Error(`Google API エラー: ${response.status} ${errorText}`);
+      }
+      console.log(`⚠️ Googleサーバー混雑中(${response.status})。${i + 1}回目の再試行を待機します...`);
+      // 1回目は1秒、2回目は2秒、3回目は4秒...と徐々に待つ時間を延ばして再アタックする
+      await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+      continue;
+    }
+
+    // それ以外の致命的なエラー（パスワード間違いなど）はすぐに諦める
+    throw new Error(`Google API エラー: ${response.status} ${errorText}`);
+  }
+}
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -32,11 +58,11 @@ serve(async (req: Request) => {
       });
     }
 
-    // Gemini API 呼び出し
+    // Gemini API 呼び出し (最新の gemini-1.5-flash)
     const apiKey = Deno.env.get("GEMINI_API_KEY") ?? ""
-    if (!apiKey) throw new Error("GEMINI_API_KEYが設定されていません。SupabaseのSecretsを確認してください。")
+    if (!apiKey) throw new Error("GEMINI_API_KEYが設定されていません。")
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
 
     const systemPrompt = `あなたは優秀なレシート解析AIです。画像から商品名、単価、個数を抽出してください。
 単価は1個あたりの最終的な数値を計算して入れてください。
@@ -49,29 +75,19 @@ ${learningPrompt}
   ]
 }`
 
-    const response = await fetch(apiUrl, {
+    // ⭐️ 修正：普通の fetch ではなく、自作した fetchWithRetry を使って呼び出す！
+    const response = await fetchWithRetry(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: systemPrompt },
-              { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
-            ]
-          }
-        ],
+        contents: [{ parts: [{ text: systemPrompt }, { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }] }],
         generationConfig: {
           responseMimeType: "application/json"
         }
       })
     })
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Google API エラー: ${response.status} ${errorText}`);
-    }
 
-    const aiData = await response.json()
+    const aiData = await (response as Response).json()
     let rawAiText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
     // クレンジング処理
@@ -82,9 +98,7 @@ ${learningPrompt}
 
     // JSON抽出
     const jsonMatch = rawAiText.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      throw new Error(`AIの応答から有効なJSON構造が検出されませんでした。\nAI応答: ${rawAiText}`);
-    }
+    if (!jsonMatch) throw new Error(`AIの応答から有効なJSON構造が検出されませんでした。\nAI応答: ${rawAiText}`);
 
     const cleanJsonText = jsonMatch[0]
     let parsedData;
@@ -94,19 +108,12 @@ ${learningPrompt}
       throw new Error(`JSONパースエラー: AIの生成データが破損しています。\nデータ: ${cleanJsonText}`)
     }
 
-    // 正常終了時は結果を返す
     return new Response(JSON.stringify(parsedData), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 })
 
   } catch (error: any) {
     console.error("🔥 Edge Function 内部エラー:", error);
-
-    // エラーが起きたら、必ず status: 200 でReactにエラーメッセージを届ける！
-    // (ここで 400 や 500 を返すと、React側でエラーの中身が読めなくなってしまうため)
     return new Response(
-      JSON.stringify({
-        items: [],
-        error: error.message || "Unknown error"
-      }),
+      JSON.stringify({ items: [], error: error.message || "Unknown error" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
     )
   }

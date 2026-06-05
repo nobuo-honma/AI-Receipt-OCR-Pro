@@ -55,8 +55,13 @@ serve(async (req: Request) => {
     const apiKey = Deno.env.get("GEMINI_API_KEY") ?? ""
     if (!apiKey) throw new Error("GEMINI_API_KEYが設定されていません。")
 
-    // ⭐️ 修正：正しい最新モデル「gemini-1.5-flash」に戻す！
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
+    // ⭐️ フォールバック方式：利用可能なモデルを順番に試す
+    const modelCandidates = [
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-preview-04-17",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash-latest",
+    ]
 
     const systemPrompt = `あなたは優秀なレシート解析AIです。画像から商品名、単価、個数を抽出してください。
 単価は1個あたりの最終的な数値を計算して入れてください。
@@ -69,24 +74,47 @@ ${learningPrompt}
   ]
 }`
 
-    // ⭐️ 修正：1.5-flashは JSON強制モード(generationConfig) に対応しているので復活させる！
-    const response = await fetchWithRetry(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: systemPrompt },
-              { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
-            ]
-          }
-        ],
-        generationConfig: {
-          responseMimeType: "application/json"
+    // ⭐️ フォールバック実行：モデルを順番に試して成功したものを使う
+    const requestBody = JSON.stringify({
+      contents: [
+        {
+          parts: [
+            { text: systemPrompt },
+            { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
+          ]
         }
-      })
+      ],
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
     })
+
+    let response: Response | undefined
+    let lastError = ""
+    for (const model of modelCandidates) {
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+      console.log(`🔍 モデル試行: ${model}`)
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: requestBody,
+      })
+      if (res.ok) {
+        console.log(`✅ モデル成功: ${model}`)
+        response = res
+        break
+      }
+      const errText = await res.text()
+      console.log(`⚠️ モデル ${model} 失敗 (${res.status}): ${errText.slice(0, 120)}`)
+      lastError = `Google API エラー: ${res.status} ${errText}`
+      // 429(クォータ超過) と 404(モデル未存在) は次のモデルを試す
+      if (res.status === 429 || res.status === 404) continue
+      // それ以外(401, 400 など)は即時エラー
+      throw new Error(lastError)
+    }
+
+    if (!response) throw new Error(`全モデルが失敗しました。最後のエラー: ${lastError}`)
+
 
     const aiData = await (response as Response).json()
     let rawAiText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || ""

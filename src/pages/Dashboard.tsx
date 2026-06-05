@@ -371,7 +371,7 @@ export default function Dashboard() {
                 <h2 className="no-print text-xl font-bold text-bakery-textMain mb-4 flex items-center gap-2">🗓️ 商品別 × 日別 販売個数一覧（カテゴリ別）</h2>
                 <div className="overflow-x-auto pb-4">
                   <table className="w-full text-sm text-left border-collapse min-w-max">
-                    <thead><tr className="bg-bakery-surface text-bakery-primary border-b-2 border-bakery-border"><th className="p-3 sticky left-0 bg-bakery-surface z-10 font-bold border-r border-bakery-border/50">カテゴリ・商品名</th><th className="p-3 text-center border-r border-bakery-border/50 bg-[#FDF0D5] font-bold">期間合計</th>{dailyData.dates.map(date => (<th key={date} className="p-3 text-center border-r border-bakery-border/50 font-bold">{formatShortDate(date)}</th>))}</tr></thead>
+                    <thead><tr className="bg-bakery-surface text-bakery-primary border-b-2 border-bakery-border"><th className="p-3 sticky left-0 bg-bakery-surface z-10 font-bold border-r border-bakery-border/50">カテゴリ・商品名</th><th className="p-3 text-center border-r border-bakery-border/50 bg-bakery-surface font-bold">期間合計</th>{dailyData.dates.map(date => (<th key={date} className="p-3 text-center border-r border-bakery-border/50 font-bold">{formatShortDate(date)}</th>))}</tr></thead>
                     <tbody>
                       {sortedCategoryKeys.map(cat => {
                         const itemsInCategory = groupedDailyItems[cat];

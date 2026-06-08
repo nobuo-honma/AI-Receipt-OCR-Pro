@@ -15,7 +15,7 @@ serve(async (req: Request) => {
     const { imageBase64 } = await req.json()
     if (!imageBase64) throw new Error("画像データがありません。")
 
-    // Supabaseへの接続と学習データ取得
+    // Supabaseへの接続
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? ""
     const supabase = createClient(supabaseUrl, supabaseAnonKey)
@@ -32,11 +32,14 @@ serve(async (req: Request) => {
       });
     }
 
-    const apiKey = Deno.env.get("GEMINI_API_KEY") ?? ""
-    if (!apiKey) throw new Error("GEMINI_API_KEYが設定されていません。")
+    // ⭐️ 修正：APIキーが空っぽの場合は、Googleに送る前にここで強制終了させる！
+    const apiKey = Deno.env.get("GEMINI_API_KEY");
+    if (!apiKey || apiKey.trim() === "") {
+      throw new Error("🚨 サーバーエラー: GEMINI_API_KEY が Supabase に設定されていません。ターミナルから `supabase secrets set GEMINI_API_KEY=...` を実行してください。");
+    }
 
-    // ⭐️ 修正：APIが有効化されていれば、これで確実に動きます！
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
+    // 正しくキーが入っていれば、Googleへ送信！
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey.trim()}`
 
     const systemPrompt = `あなたは優秀なレシート解析AIです。画像から商品名、単価、個数を抽出してください。
 単価は1個あたりの最終的な数値を計算して入れてください。
@@ -49,7 +52,6 @@ ${learningPrompt}
   ]
 }`
 
-    // Geminiへ送信
     const response = await fetch(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -76,13 +78,11 @@ ${learningPrompt}
     const aiData = await response.json()
     let rawAiText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    // クレンジング処理
     if (rawAiText.includes("```")) {
       rawAiText = rawAiText.replace(/```json/g, "").replace(/```/g, "")
     }
     rawAiText = rawAiText.trim()
 
-    // JSON抽出
     const jsonMatch = rawAiText.match(/\{[\s\S]*\}/)
     if (!jsonMatch) throw new Error(`AIの応答から有効なJSON構造が検出されませんでした。\nAI応答: ${rawAiText}`);
 

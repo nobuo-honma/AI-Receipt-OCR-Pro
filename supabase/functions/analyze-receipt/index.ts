@@ -8,6 +8,21 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
+const fetchWithRetry = async (url: string, options: any, maxRetries = 3) => {
+  for (let i = 0; i < maxRetries; i++) {
+    const response = await fetch(url, options);
+    if (response.ok) return response;
+
+    const errorText = await response.text();
+    if (response.status === 503 || response.status === 429) {
+      if (i === maxRetries - 1) throw new Error(`Google API エラー: ${response.status} ${errorText}`);
+      await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+      continue;
+    }
+    throw new Error(`Google API エラー: ${response.status} ${errorText}`);
+  }
+}
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -15,7 +30,7 @@ serve(async (req: Request) => {
     const { imageBase64 } = await req.json()
     if (!imageBase64) throw new Error("画像データがありません。")
 
-    // Supabaseへの接続
+    // Supabaseへの接続と学習データ取得
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? ""
     const supabase = createClient(supabaseUrl, supabaseAnonKey)
@@ -32,27 +47,23 @@ serve(async (req: Request) => {
       });
     }
 
-    // ⭐️ 修正：APIキーが空っぽの場合は、Googleに送る前にここで強制終了させる！
-    const apiKey = Deno.env.get("GEMINI_API_KEY");
-    if (!apiKey || apiKey.trim() === "") {
-      throw new Error("🚨 サーバーエラー: GEMINI_API_KEY が Supabase に設定されていません。ターミナルから `supabase secrets set GEMINI_API_KEY=...` を実行してください。");
-    }
+    const apiKey = Deno.env.get("GEMINI_API_KEY") ?? ""
+    if (!apiKey) throw new Error("GEMINI_API_KEYが設定されていません。")
 
-    // 正しくキーが入っていれば、Googleへ送信！
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey.trim()}`
+    // ⭐️ 修正1: 安定版のAPI(v1)と、最も確実なモデル(gemini-1.5-flash)を指定！
+    const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`
 
-    const systemPrompt = `あなたは優秀なレシート解析AIです。画像から商品名、単価、個数を抽出してください。
-単価は1個あたりの最終的な数値を計算して入れてください。
-出力は【必ず】以下のJSONフォーマットのみにしてください。マークダウンや挨拶、解説は一切不要です。
+    const systemPrompt = `画像から商品名、単価、個数を抽出してください。単価は1個あたりの数値を計算してください。
+出力は以下のJSONフォーマットのみにしてください。
 ${learningPrompt}
-
 {
   "items": [
     { "name": "商品名", "price": 100, "qty": 1 }
   ]
 }`
 
-    const response = await fetch(apiUrl, {
+    // ⭐️ 修正2: v1で確実に動くデータ構造に変更！
+    const response = await fetchWithRetry(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -63,35 +74,26 @@ ${learningPrompt}
               { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
             ]
           }
-        ],
-        generationConfig: {
-          responseMimeType: "application/json"
-        }
+        ]
+        // ※ v1 では JSON強制モードを外しておく方が安全です
       })
     })
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Google API エラー: ${response.status} ${errorText}`);
-    }
-
-    const aiData = await response.json()
+    const aiData = await (response as Response).json()
     let rawAiText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    if (rawAiText.includes("```")) {
-      rawAiText = rawAiText.replace(/```json/g, "").replace(/```/g, "")
-    }
+    if (rawAiText.includes("```")) rawAiText = rawAiText.replace(/```json/g, "").replace(/```/g, "")
     rawAiText = rawAiText.trim()
 
     const jsonMatch = rawAiText.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) throw new Error(`AIの応答から有効なJSON構造が検出されませんでした。\nAI応答: ${rawAiText}`);
+    if (!jsonMatch) throw new Error(`AIの応答からJSONが検出されませんでした。\n応答: ${rawAiText}`);
 
     const cleanJsonText = jsonMatch[0]
     let parsedData;
     try {
       parsedData = JSON.parse(cleanJsonText)
     } catch (parseErr) {
-      throw new Error(`JSONパースエラー: AIの生成データが破損しています。\nデータ: ${cleanJsonText}`)
+      throw new Error(`JSONパースエラー。\nデータ: ${cleanJsonText}`)
     }
 
     return new Response(JSON.stringify(parsedData), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 })

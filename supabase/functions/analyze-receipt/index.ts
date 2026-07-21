@@ -1,4 +1,3 @@
-// supabase/functions/analyze-receipt/index.ts
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -28,7 +27,7 @@ serve(async (req: Request) => {
     const { imageBase64 } = await req.json()
     if (!imageBase64) throw new Error("画像データがありません。")
 
-    // Google Cloud Vision API でOCR（月1,000回まで無料）
+    // Google Cloud Vision API でOCR
     const visionApiKey = Deno.env.get("GOOGLE_VISION_API_KEY") ?? ""
     if (!visionApiKey) throw new Error("GOOGLE_VISION_API_KEYが設定されていません。")
 
@@ -55,10 +54,10 @@ serve(async (req: Request) => {
     const blocks = visionData.responses?.[0]?.textAnnotations || []
 
     if (!fullText || blocks.length === 0) {
-      throw new Error("画像からテキストを読み取れませんでした。画像が鮮明か確認してください。")
+      throw new Error("画像からテキストを読み取れませんでした。")
     }
 
-    // ⭐️ 修正：バックエンドではパースせず、生データと「座標情報(blocks)」をそのまま返す！
+    // 座標情報(blocks)をそのまま返す
     return new Response(JSON.stringify({ text: fullText, blocks: blocks }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200

@@ -6,7 +6,7 @@ import bakeryHeroImg from '/bakery-hero.jpg';
 function MenuCard({ to, enTitle, jpTitle, icon: Icon }: { to: string, enTitle: string, jpTitle: string, icon: any }) {
   return (
     <Link to={to} className="group block">
-      <div className="relative flex flex-col items-center justify-center h-full min-h-[160px] p-6 bg-bakery-surface border border-[#E8DCC4] rounded-lg transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_8px_20px_rgba(107,66,38,0.15)] group-hover:bg-[#FFF8E7] group-hover:border-bakery-border">
+      <div className="relative flex flex-col items-center justify-center h-full min-h-40 p-6 bg-bakery-surface border border-[#E8DCC4] rounded-lg transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_8px_20px_rgba(107,66,38,0.15)] group-hover:bg-[#FFF8E7] group-hover:border-bakery-border">
         <span className="font-playfair italic text-3xl text-bakery-primary mb-1 tracking-wider opacity-90 group-hover:text-[#8B5E3C] transition-colors">{enTitle}</span>
         <span className="font-zen font-bold tracking-[0.2em] text-[#8B6340] text-sm mb-4">{jpTitle}</span>
         <div className="text-bakery-textMain opacity-70 group-hover:scale-110 transition-transform duration-300 group-hover:text-bakery-gold"><Icon size={42} strokeWidth={1.2} /></div>
@@ -37,14 +37,14 @@ export default function Home() {
       <div className="w-full max-w-5xl mx-auto px-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <Link to="/analyze" className="group block">
-            <div className="relative flex flex-col md:flex-row items-center justify-center gap-6 h-full min-h-[140px] p-6 bg-bakery-surface border border-[#E8DCC4] rounded-lg transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-md group-hover:bg-[#FFF8E7] group-hover:border-bakery-border">
+            <div className="relative flex flex-col md:flex-row items-center justify-center gap-6 h-full min-h-35 p-6 bg-bakery-surface border border-[#E8DCC4] rounded-lg transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-md group-hover:bg-[#FFF8E7] group-hover:border-bakery-border">
               <div className="text-bakery-textMain opacity-70 group-hover:scale-110 transition-transform duration-300 group-hover:text-bakery-gold"><Camera size={52} strokeWidth={1.2} /></div>
               <div className="text-center md:text-left"><span className="block font-playfair italic text-3xl text-bakery-primary mb-1 tracking-wider opacity-90 group-hover:text-[#8B5E3C]">Receipt</span><span className="block font-zen font-bold tracking-[0.2em] text-[#8B6340] text-sm">レシート解析 (日計表対応)</span></div>
               <div className="absolute bottom-2 right-3 flex items-center text-bakery-gold font-zen font-bold text-[9px] tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">OPEN ▶</div>
             </div>
           </Link>
           <Link to="/dashboard" className="group block">
-            <div className="relative flex flex-col md:flex-row items-center justify-center gap-6 h-full min-h-[140px] p-6 bg-bakery-surface border border-[#E8DCC4] rounded-lg transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-md group-hover:bg-[#FFF8E7] group-hover:border-bakery-border">
+            <div className="relative flex flex-col md:flex-row items-center justify-center gap-6 h-full min-h-35 p-6 bg-bakery-surface border border-[#E8DCC4] rounded-lg transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-md group-hover:bg-[#FFF8E7] group-hover:border-bakery-border">
               <div className="text-bakery-textMain opacity-70 group-hover:scale-110 transition-transform duration-300 group-hover:text-bakery-gold"><BarChart3 size={52} strokeWidth={1.2} /></div>
               <div className="text-center md:text-left"><span className="block font-playfair italic text-3xl text-bakery-primary mb-1 tracking-wider opacity-90 group-hover:text-[#8B5E3C]">Dashboard</span><span className="block font-zen font-bold tracking-[0.2em] text-[#8B6340] text-sm">売上・製造集計 (月報出力)</span></div>
               <div className="absolute bottom-2 right-3 flex items-center text-bakery-gold font-zen font-bold text-[9px] tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">OPEN ▶</div>

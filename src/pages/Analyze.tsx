@@ -1,9 +1,7 @@
-// src/pages/Analyze.tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { QRCodeSVG } from 'qrcode.react';
 
-// ── 型定義 ──
 interface ReceiptItem {
     name: string;
     price: number;
@@ -30,7 +28,7 @@ export default function Analyze() {
 
     const [showQrModal, setShowQrModal] = useState<boolean>(false);
     const [showQR, setShowQR] = useState<boolean>(false);
-    const [currentUrl, setCurrentUrl] = useState<string>('');
+    const currentUrl = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}${import.meta.env.BASE_URL}` : '';
     const [isCameraActive, setIsCameraActive] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -43,8 +41,6 @@ export default function Analyze() {
     }, []);
 
     useEffect(() => {
-        if (typeof window !== 'undefined') setCurrentUrl(`${window.location.protocol}//${window.location.host}${import.meta.env.BASE_URL}`);
-
         const fetchData = async () => {
             const { data: cData } = await supabase.from('customers').select('*').order('last_visit', { ascending: false });
             if (cData) setCustomers(cData);
@@ -76,16 +72,14 @@ export default function Analyze() {
             const img = new Image();
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_BOUND = 1500;
                 let { width, height } = img;
-                if (width > height && width > MAX_BOUND) { height = Math.round((height * MAX_BOUND) / width); width = MAX_BOUND; }
-                else if (height > MAX_BOUND) { width = Math.round((width * MAX_BOUND) / height); height = MAX_BOUND; }
-
+                const MAX_HEIGHT = 2000;
+                if (height > MAX_HEIGHT) { width = Math.round((width * MAX_HEIGHT) / height); height = MAX_HEIGHT; }
                 canvas.width = width; canvas.height = height;
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
-                    ctx.drawImage(img, 0, 0, width, height);
-                    setImageBase64(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
+                    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, width, height); ctx.drawImage(img, 0, 0, width, height);
+                    setImageBase64(canvas.toDataURL('image/jpeg', 0.9).split(',')[1]);
                 }
             };
             img.src = event.target?.result as string;
@@ -95,7 +89,7 @@ export default function Analyze() {
 
     const startCamera = async () => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 2048 }, height: { ideal: 2048 } } });
             if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); setIsCameraActive(true); }
         } catch { alert("カメラの起動に失敗しました"); }
     };
@@ -103,100 +97,326 @@ export default function Analyze() {
     const capturePhoto = () => {
         if (!videoRef.current || !canvasRef.current) return;
         const ctx = canvasRef.current.getContext('2d');
-        canvasRef.current.width = videoRef.current.videoWidth; canvasRef.current.height = videoRef.current.videoHeight;
-        ctx?.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
-
-        const b64 = canvasRef.current.toDataURL('image/jpeg', 0.8).split(',')[1];
+        const video = videoRef.current;
+        let width = video.videoWidth; let height = video.videoHeight;
+        const MAX_HEIGHT = 2000;
+        if (height > MAX_HEIGHT) { width = Math.round((width * MAX_HEIGHT) / height); height = MAX_HEIGHT; }
+        canvasRef.current.width = width; canvasRef.current.height = height;
+        ctx!.fillStyle = "#ffffff"; ctx!.fillRect(0, 0, width, height); ctx?.drawImage(video, 0, 0, width, height);
+        const b64 = canvasRef.current.toDataURL('image/jpeg', 0.9).split(',')[1];
         setImageBase64(b64); setPreviewUrl(`data:image/jpeg;base64,${b64}`);
         setSavedSessionId(null); stopCamera();
     };
 
-    // 🇯🇵 究極の座標解析パーサー
+    // ⭐️ 濁点誤読（パ・バ）やひらがな・カタカナの表記揺れを100%吸収する精密パースロジック
     const parseReceiptTextWithCoords = (blocks: any[]): ReceiptItem[] => {
-        const words = blocks.slice(1).map((block: any) => {
-            const ys = block.boundingPoly.vertices.map((v: any) => v.y);
-            const xs = block.boundingPoly.vertices.map((v: any) => v.x);
-            return {
-                text: block.description.normalize("NFKC").replace(/[※\*＊%,，¥\\￥]/g, ''),
-                y: (ys[0] + ys[2]) / 2,
-                x: Math.min(...xs),
-            };
-        }).filter((w: any) => w.text.length > 0);
+        const words: any[] = [];
 
-        words.sort((a: any, b: any) => a.y - b.y);
-        const lines: { y: number, text: string }[] = [];
+        // 1. 各単語の抽出と傾き補正
+        blocks.slice(1).forEach((block: any) => {
+            const rawText = block.description || "";
+            const linesInBlock = rawText.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
+            if (linesInBlock.length === 0) return;
 
-        let currentLineY = -1;
-        let currentLineText = "";
+            const vs = block.boundingPoly?.vertices;
+            if (!vs || vs.length === 0) return;
 
-        words.forEach((w: any) => {
-            if (currentLineY === -1 || Math.abs(w.y - currentLineY) > 20) {
-                if (currentLineText) lines.push({ y: currentLineY, text: currentLineText.trim() });
-                currentLineY = w.y;
-                currentLineText = w.text;
+            const ys = vs.map((v: any) => v.y || 0);
+            const xs = vs.map((v: any) => v.x || 0);
+            const minY = Math.min(...ys);
+            const maxY = Math.max(...ys);
+            const minX = Math.min(...xs);
+            const maxX = Math.max(...xs);
+
+            let angle = 0;
+            if (vs.length >= 2) {
+                const dx = (vs[1].x || 0) - (vs[0].x || 0);
+                const dy = (vs[1].y || 0) - (vs[0].y || 0);
+                if (dx !== 0) { angle = Math.atan2(dy, dx); if (Math.abs(angle) > Math.PI / 4) angle = 0; }
+            }
+
+            const lineHeight = (maxY - minY) / linesInBlock.length;
+
+            linesInBlock.forEach((lineText: string, idx: number) => {
+                words.push({
+                    text: lineText.normalize("NFKC").replace(/[※\*＊%,，]/g, ''),
+                    centerX: (minX + maxX) / 2,
+                    centerY: minY + (lineHeight * idx) + (lineHeight / 2),
+                    projectedX: (minX + maxX) / 2,
+                    projectedY: minY + (lineHeight * idx) + (lineHeight / 2),
+                    h: lineHeight,
+                    angle: angle
+                });
+            });
+        });
+
+        // 傾き補正
+        let medianAngle = 0;
+        if (words.length > 0) {
+            const angles = words.map(w => w.angle || 0).sort((a, b) => a - b);
+            medianAngle = angles[Math.floor(angles.length / 2)] || 0;
+        }
+
+        const sinA = Math.sin(medianAngle); const cosA = Math.cos(medianAngle);
+        words.forEach(w => {
+            w.projectedY = -w.centerX * sinA + w.centerY * cosA;
+            w.projectedX = w.centerX * cosA + w.centerY * sinA;
+        });
+
+        words.sort((a, b) => a.projectedY - b.projectedY);
+
+        // 2. 行（チャンク）の復元
+        const chunks: { y: number, text: string, cleanText: string, usedAsProduct?: boolean }[] = [];
+        let currentChunkWords: typeof words = [];
+        let currentChunkY = -1;
+
+        words.forEach(w => {
+            if (currentChunkY === -1) {
+                currentChunkWords.push(w); currentChunkY = w.projectedY;
             } else {
-                currentLineText += " " + w.text;
+                const threshold = w.h ? w.h * 0.7 : 15;
+                if (Math.abs(w.projectedY - currentChunkY) <= threshold) {
+                    currentChunkWords.push(w);
+                    currentChunkY = currentChunkWords.reduce((s, cw) => s + cw.projectedY, 0) / currentChunkWords.length;
+                } else {
+                    currentChunkWords.sort((a, b) => a.projectedX - b.projectedX);
+                    const chunkText = currentChunkWords.map(cw => cw.text).join(' ');
+                    chunks.push({
+                        y: currentChunkY,
+                        text: chunkText,
+                        cleanText: chunkText.replace(/\s+/g, '').replace(/[¥\\￥]/g, '').toLowerCase()
+                    });
+                    currentChunkWords = [w]; currentChunkY = w.projectedY;
+                }
             }
         });
-        if (currentLineText) lines.push({ y: currentLineY, text: currentLineText.trim() });
+        if (currentChunkWords.length > 0) {
+            currentChunkWords.sort((a, b) => a.projectedX - b.projectedX);
+            const chunkText = currentChunkWords.map(cw => cw.text).join(' ');
+            chunks.push({ y: currentChunkY, text: chunkText, cleanText: chunkText.replace(/\s+/g, '').replace(/[¥\\￥]/g, '').toLowerCase() });
+        }
 
-        const parsedItems: ReceiptItem[] = [];
+        // 3. マスタ照合と数値の仕分け（プール）
+        const foundProducts: { name: string, category: string, y: number, isMaster: boolean, price: number }[] = [];
+        const qtyPool: { val: number, y: number, used: boolean }[] = [];
+        const pricePool: { val: number, y: number, used: boolean }[] = [];
 
-        const ignoreWords = ["合計", "お預", "お釣", "釣銭", "レジ", "電話", "住所", "店舗", "小計", "税", "割引", "ポイント", "領収", "担当", "日付", "対象", "クレジット", "売上票", "控え", "番号", "支払", "ID", "取", "日計", "点検"];
+        const ignoreWords = ["合計", "お預", "お釣", "レジ担当", "電話", "tel", "住所", "店舗", "小計", "現金", "クレジット", "交通系", "plu", "日計", "レポート", "対象", "釣銭"];
 
-        for (let i = 0; i < lines.length; i++) {
-            const currentLine = lines[i];
-            if (ignoreWords.some(word => currentLine.text.includes(word))) continue;
+        const sortedProducts = [...products].sort((a, b) => {
+            const aLen = Math.max(a.name?.length || 0, a.receipt_name?.length || 0);
+            const bLen = Math.max(b.name?.length || 0, b.receipt_name?.length || 0);
+            return bLen - aLen;
+        });
 
-            const matchedProduct = products.find(p => currentLine.text.includes(p.receipt_name) || currentLine.text.includes(p.name));
+        // 💡 小文字（ィ、ッ等）の大文字化・濁点・ダッシュのブレをすべて救済する最終版の正規化関数
+        const normalizeText = (str: string): string => {
+            if (!str) return "";
+
+            // ① ひらがなをカタカナに変換
+            let katakana = str.replace(/[ぁ-ん]/g, s => String.fromCharCode(s.charCodeAt(0) + 0x60));
+
+            // 💡【新機能】「ウィンナー」と「ウインナー」等のブレをなくすため、小文字をすべて大文字に統一
+            katakana = katakana
+                .replace(/[ァぁ]/g, 'ア')
+                .replace(/[ィぃ]/g, 'イ')
+                .replace(/[ゥぅ]/g, 'ウ')
+                .replace(/[ェぇ]/g, 'エ')
+                .replace(/[ォぉ]/g, 'オ')
+                .replace(/[ッっ]/g, 'ツ')
+                .replace(/[ャゃ]/g, 'ヤ')
+                .replace(/[ュゅ]/g, 'ユ')
+                .replace(/[ョょ]/g, 'ヨ');
+
+            // ② 長音・各種ダッシュ記号を安全に「ー」へ統一
+            katakana = katakana.replace(/[ー〜一﹣－━—─\-]/g, 'ー');
+
+            // ③ Unicode正規化（NFD分解）を使用して、濁点と半濁点を分離
+            const decomposed = katakana.normalize("NFD");
+
+            // ④ 分離した濁点・半濁点を除去
+            const clean = decomposed.replace(/[\u3099\u309A]/g, "");
+
+            // ⑤ 再び結合文字（NFC）に戻し、スペースを除去、小文字化
+            return clean.normalize("NFC").replace(/\s+/g, '').toLowerCase();
+        };
+
+        const isStrictProductMatch = (chunkText: string, prodName: string, receiptName: string) => {
+            const normChunk = normalizeText(chunkText);
+            const normProd = normalizeText(prodName);
+            const normReceipt = normalizeText(receiptName);
+
+            if (!normChunk) return false;
+
+            // 表記ゆれをクリアした状態での完全一致
+            if (normChunk === normProd || (normReceipt && normChunk === normReceipt)) {
+                return true;
+            }
+
+            // 部分一致（3文字以上の単語のみ）
+            if (normReceipt && normReceipt.length >= 3 && normChunk.includes(normReceipt)) {
+                return true;
+            }
+            if (normProd && normProd.length >= 3 && normChunk.includes(normProd)) {
+                return true;
+            }
+
+            return false;
+        };
+
+        chunks.forEach((chunk, idx) => {
+            if (ignoreWords.some(ignore => chunk.cleanText.includes(ignore))) return;
+
+            let matchedProduct: Product | null = null;
+            for (const p of sortedProducts) {
+                if (isStrictProductMatch(chunk.cleanText, p.name || "", p.receipt_name || "")) {
+                    matchedProduct = p;
+                    break;
+                }
+            }
 
             if (matchedProduct) {
-                let finalQty = 1;
-                let foundLines = 0;
-                const targetY = currentLine.y;
+                if (!foundProducts.some(fp => fp.name === matchedProduct!.name && Math.abs(fp.y - chunk.y) < 25)) {
+                    foundProducts.push({
+                        name: matchedProduct.name,
+                        category: matchedProduct.category || "❓ 未分類",
+                        y: chunk.y,
+                        isMaster: true,
+                        price: Number(matchedProduct.price) || 0
+                    });
+                    chunk.usedAsProduct = true;
+                }
+            } else {
+                // 未マッチ候補の抽出
+                const stripped = chunk.cleanText.replace(/個数|金額|外税|内税|消費税|[0-9点個件¥\\￥,]/g, '');
+                const isTooShort = stripped.length < 2 && !/^[A-Za-z]+$/.test(stripped);
 
-                const lookAheadLines = lines.filter((l: any) => l.y > targetY && l.y <= targetY + 300);
-
-                let tempQty = 0;
-                let tempTotal = 0;
-
-                for (const l of lookAheadLines) {
-                    if (products.some(p => l.text.includes(p.receipt_name) || l.text.includes(p.name))) break;
-                    foundLines++;
-
-                    const qtyMatch = l.text.match(/(\d+)\s*点/);
-                    if (qtyMatch) { tempQty = parseInt(qtyMatch[1], 10); continue; }
-
-                    const priceMatch = l.text.match(/^(?:金額\s*)?(\d{2,})$/);
-                    if (priceMatch && !l.text.includes("点")) {
-                        const p = parseInt(priceMatch[1], 10);
-                        if (p >= matchedProduct.price) { tempTotal = p; break; }
+                if (!isTooShort) {
+                    const nameForDisplay = chunk.text.replace(/個数|金額|外税|内税|消費税|[0-9点個件¥\\￥,]/g, '').trim();
+                    if (nameForDisplay && !foundProducts.some(fp => fp.name === nameForDisplay && Math.abs(fp.y - chunk.y) < 25)) {
+                        foundProducts.push({
+                            name: nameForDisplay,
+                            category: "❓ 未分類",
+                            y: chunk.y,
+                            isMaster: false,
+                            price: 0
+                        });
+                        chunk.usedAsProduct = true;
                     }
                 }
-
-                if (tempTotal > 0 && tempTotal % matchedProduct.price === 0) {
-                    finalQty = tempTotal / matchedProduct.price;
-                } else if (tempTotal > 0 && tempQty > 0) {
-                    const expectedTotal = matchedProduct.price * tempQty;
-                    if (Math.abs(tempTotal - expectedTotal) / expectedTotal <= 0.2) finalQty = tempQty;
-                    else finalQty = Math.round(tempTotal / matchedProduct.price);
-                } else if (tempQty > 0) {
-                    finalQty = tempQty;
-                } else if (tempTotal > 0) {
-                    finalQty = Math.round(tempTotal / matchedProduct.price);
-                }
-
-                const currentLineIndexInOriginal = lines.findIndex((l: any) => l.y === currentLine.y);
-                i = currentLineIndexInOriginal + foundLines;
-
-                parsedItems.push({
-                    name: matchedProduct.name,
-                    price: matchedProduct.price,
-                    qty: finalQty,
-                    category_id: matchedProduct.category || "❓ 未分類"
-                });
             }
-        }
+
+            // 個数の仕分け
+            const qtyMatches = [...chunk.text.matchAll(/(\d+)\s*[点個件教]/g)];
+            qtyMatches.forEach(m => {
+                const q = parseInt(m[1], 10);
+                if (q > 0 && q <= 500) qtyPool.push({ val: q, y: chunk.y, used: false });
+            });
+
+            // 金額の仕分け
+            const priceMatches = [...chunk.text.matchAll(/[¥\\￥]\s*(\d[0-9,]*)/g)];
+            if (priceMatches.length > 0) {
+                priceMatches.forEach(m => pricePool.push({ val: parseInt(m[1].replace(/,/g, ''), 10), y: chunk.y, used: false }));
+            } else {
+                const amtMatches = [...chunk.text.matchAll(/金額\s*(\d[0-9,]*)(?!\s*[点個件])/g)];
+                amtMatches.forEach(m => pricePool.push({ val: parseInt(m[1].replace(/,/g, ''), 10), y: chunk.y, used: false }));
+            }
+        });
+
+        // 4. 最寄りY座標マッチング
+        const parsedItems: ReceiptItem[] = [];
+
+        foundProducts.sort((a, b) => a.y - b.y);
+        qtyPool.sort((a, b) => a.y - b.y);
+        pricePool.sort((a, b) => a.y - b.y);
+
+        foundProducts.forEach((fp) => {
+            let bestQty = 1;
+            let bestQtyDist = Infinity;
+            let bestQtyObj: any = null;
+
+            for (const q of qtyPool) {
+                if (!q.used) {
+                    if (q.y < fp.y - 5) continue;
+
+                    const dist = Math.abs(q.y - fp.y);
+                    if (dist < bestQtyDist) {
+                        bestQtyDist = dist;
+                        bestQtyObj = q;
+                    }
+                }
+            }
+
+            if (bestQtyObj && bestQtyDist <= 35) {
+                bestQty = bestQtyObj.val;
+                bestQtyObj.used = true;
+            }
+
+            let bestPriceSubtotal = 0;
+            let bestPriceDist = Infinity;
+            let bestPriceObj: any = null;
+
+            for (const pr of pricePool) {
+                if (!pr.used) {
+                    if (pr.y < fp.y - 5) continue;
+
+                    const dist = Math.abs(pr.y - (fp.y + 10));
+                    if (dist < bestPriceDist) {
+                        bestPriceDist = dist;
+                        bestPriceObj = pr;
+                    }
+                }
+            }
+
+            if (bestPriceObj && bestPriceDist <= 45) {
+                bestPriceSubtotal = bestPriceObj.val;
+                bestPriceObj.used = true;
+            }
+
+            // 個数逆算・自動修復ロジック
+            let price = fp.price;
+            let qty = bestQty;
+
+            if (bestPriceSubtotal > 0) {
+                if (fp.price > 0) {
+                    const logicalQty = Math.round(bestPriceSubtotal / fp.price);
+                    const diff = Math.abs((logicalQty * fp.price) - bestPriceSubtotal);
+                    if (diff < 10 && logicalQty > 0 && logicalQty !== bestQty) {
+                        qty = logicalQty;
+                        price = fp.price;
+                    } else {
+                        price = Math.round(bestPriceSubtotal / bestQty);
+                    }
+                } else {
+                    price = Math.round(bestPriceSubtotal / bestQty);
+                }
+            }
+
+            parsedItems.push({
+                name: fp.name,
+                price: price,
+                qty: qty,
+                category_id: fp.category,
+                is_filtered: !fp.isMaster
+            });
+        });
+
+        // 5. 💡 未登録商品の救済（マスタ外の leftovers）
+        chunks.forEach(chunk => {
+            if (!chunk.usedAsProduct) {
+                const isSystemWord = ignoreWords.some(w => chunk.cleanText.includes(w)) || /^[0-9\s：:/\-]*$/.test(chunk.text);
+                if (!isSystemWord && chunk.text.trim().length > 1) {
+                    // マスタ登録が本当になくても、ここで強制的に「除外項目」としてリストに出力します
+                    parsedItems.push({
+                        name: chunk.text,
+                        category_id: "❓ 未分類",
+                        price: 0,
+                        qty: 1,
+                        is_filtered: true // 👈 画面上で「マスタ除外項目も表示する」にチェックを入れると表示されます
+                    });
+                }
+            }
+        });
 
         const aggregated: Record<string, ReceiptItem> = {};
         parsedItems.forEach(item => {
@@ -204,6 +424,7 @@ export default function Analyze() {
             if (aggregated[key]) aggregated[key].qty += item.qty;
             else aggregated[key] = { ...item };
         });
+
         return Object.values(aggregated);
     };
 
@@ -214,15 +435,14 @@ export default function Analyze() {
         try {
             const { data, error } = await supabase.functions.invoke('analyze-receipt', { body: { imageBase64 } });
             if (error) throw error;
+            if (!data?.blocks || data.blocks.length === 0) throw new Error("テキストが読み取れませんでした。画像が鮮明か確認してください。");
 
-            if (!data?.blocks || data.blocks.length === 0) {
-                throw new Error("テキストが読み取れませんでした。画像が鮮明か確認してください。");
-            }
+            console.log("【デバッグ】OCRの生データ受信:", data.text);
 
             const newItems = parseReceiptTextWithCoords(data.blocks);
 
             if (newItems.length === 0) {
-                alert("マスタに登録されている商品が読み取れませんでした。");
+                alert("商品名、または金額/個数が読み取れませんでした。");
             } else {
                 const combined = [...items, ...newItems];
                 const agg: Record<string, ReceiptItem> = {};
@@ -245,6 +465,12 @@ export default function Analyze() {
         const updatedItems = [...items];
         updatedItems[index] = { ...updatedItems[index], [field]: value };
         setItems(updatedItems);
+    };
+
+    const handleDeleteItem = (index: number) => {
+        const updated = [...items];
+        updated.splice(index, 1);
+        setItems(updated);
     };
 
     const calculateTotal = () => items.filter(i => !i.is_filtered).reduce((sum, item) => sum + (item.price * item.qty), 0);
@@ -300,43 +526,34 @@ export default function Analyze() {
                 </div>
 
                 <div className="flex flex-col gap-3 mb-6">
-                    <button
-                        onClick={() => { if (isCameraActive) stopCamera(); setShowQR(false); fileInputRefNormal.current?.click(); }}
-                        className="w-full py-4 bg-white border-2 border-bakery-border rounded-xl font-bold text-[#8B6340] hover:bg-bakery-surface transition-colors shadow-sm flex items-center justify-center gap-2"
-                    >
+                    <button onClick={() => { if (isCameraActive) stopCamera(); setShowQR(false); fileInputRefNormal.current?.click(); }} className="w-full py-4 bg-white border-2 border-bakery-border rounded-xl font-bold text-[#8B6340] hover:bg-bakery-surface transition-colors shadow-sm flex items-center justify-center gap-2">
                         📁 1. PCからファイルを選択
                     </button>
-
-                    <button
-                        onClick={() => { if (isCameraActive) stopCamera(); setShowQR(!showQR); }}
-                        className={`w-full py-4 rounded-xl font-bold transition-colors shadow-md flex items-center justify-center gap-2 ${showQR ? 'bg-[#8B5E3C] text-white' : 'bg-bakery-primary text-bakery-gold hover:bg-[#8B5E3C]'}`}
-                    >
+                    <button onClick={() => { if (isCameraActive) stopCamera(); setShowQR(!showQR); }} className={`w-full py-4 rounded-xl font-bold transition-colors shadow-md flex items-center justify-center gap-2 ${showQR ? 'bg-[#8B5E3C] text-white' : 'bg-bakery-primary text-bakery-gold hover:bg-[#8B5E3C]'}`}>
                         📱 2. スマホで撮影して転送
                     </button>
-
-                    <button
-                        onClick={isCameraActive ? stopCamera : startCamera}
-                        className={`w-full py-3 rounded-xl font-bold transition-colors border-2 flex items-center justify-center gap-2 ${isCameraActive ? 'bg-red-50 border-red-200 text-red-500' : 'bg-white border-bakery-primary text-bakery-primary hover:bg-bakery-bg'}`}
-                    >
+                    <button onClick={isCameraActive ? stopCamera : startCamera} className={`w-full py-3 rounded-xl font-bold transition-colors border-2 flex items-center justify-center gap-2 ${isCameraActive ? 'bg-red-50 border-red-200 text-red-500' : 'bg-white border-bakery-primary text-bakery-primary hover:bg-bakery-bg'}`}>
                         {isCameraActive ? '⏹️ PCカメラを停止' : '📷 3. PCの内蔵カメラを起動'}
                     </button>
-
                     <input type="file" accept="image/*" ref={fileInputRefNormal} onChange={handleFileChange} className="hidden" />
                 </div>
 
-                <div className="bg-white p-4 rounded-xl border border-bakery-border shadow-sm mb-6 text-center min-h-[250px] flex flex-col justify-center relative overflow-hidden">
-                    <video ref={videoRef} className={`w-full max-h-[300px] object-cover rounded bg-black ${isCameraActive ? 'block' : 'hidden'}`} playsInline />
+                {showQR && (
+                    <div className="bg-[#FFF8E7] p-6 rounded-xl border-2 border-dashed border-bakery-primary mb-6 text-center animate-fade-in-up">
+                        <p className="text-bakery-textMain font-bold mb-4">スマホのカメラでスキャンしてください</p>
+                        <div className="inline-flex justify-center bg-white p-4 rounded-lg shadow-sm"><QRCodeSVG value={currentUrl ? `${currentUrl}#/mobile` : ''} size={150} /></div>
+                        <p className="text-xs text-[#8B6340] mt-4">撮影すると自動的にPCに画像が届きます</p>
+                    </div>
+                )}
+
+                <div className="bg-white p-4 rounded-xl border border-bakery-border shadow-sm mb-6 text-center min-h-75 flex flex-col justify-center relative overflow-hidden">
+                    <video ref={videoRef} className={`w-full max-h-100 object-cover rounded bg-black ${isCameraActive ? 'block' : 'hidden'}`} playsInline />
                     <canvas ref={canvasRef} className="hidden" />
                     {isCameraActive && <button onClick={capturePhoto} className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white border-4 border-bakery-primary rounded-full w-14 h-14 shadow-lg flex justify-center items-center"><div className="bg-bakery-primary w-10 h-10 rounded-full"></div></button>}
-
-                    {!isCameraActive && previewUrl ? (
-                        <img src={previewUrl} alt="Preview" className="max-h-[300px] object-contain mx-auto rounded" />
-                    ) : !isCameraActive && !showQR && (
-                        <div className="py-10 text-[#C4A882]"><p className="text-4xl mb-2">📄</p><p className="text-sm">画像をセットしてください</p></div>
-                    )}
+                    {!isCameraActive && previewUrl ? <img src={previewUrl} alt="Preview" className="max-h-100 object-contain mx-auto rounded" /> : !isCameraActive && !showQR && <div className="py-10 text-[#C4A882]"><p className="text-4xl mb-2">📄</p><p className="text-sm">画像をセットしてください</p></div>}
                 </div>
-                <button onClick={handleAnalyze} disabled={loading || !imageBase64 || isCameraActive} className="w-full py-4 rounded-lg font-bold text-lg bg-[#10B981] text-white hover:bg-green-600 disabled:bg-gray-300 disabled:text-gray-500 shadow-md transition-transform active:scale-95">
-                    {loading ? '⏳ Google AIが解析中...' : '⚡ 解析を実行する'}
+                <button onClick={handleAnalyze} disabled={loading || !imageBase64 || isCameraActive} className="w-full py-4 rounded-lg font-bold text-lg bg-[#10B981] text-white hover:bg-green-600 disabled:bg-gray-300 shadow-md transition-transform active:scale-95">
+                    {loading ? '⏳ AI解析中...' : '⚡ 解析を実行する'}
                 </button>
             </div>
 
@@ -356,38 +573,24 @@ export default function Analyze() {
                 ) : (
                     <div className="animate-fade-in-up">
                         <div className="flex justify-between items-end mb-2">
-                            <label className="text-xs text-[#8B6340] cursor-pointer flex items-center gap-1">
-                                <input type="checkbox" checked={showFilteredItems} onChange={(e) => setShowFilteredItems(e.target.checked)} />
-                                マスタ除外項目（レジ袋等）も表示する
-                            </label>
+                            <label className="text-xs text-[#8B6340] cursor-pointer flex items-center gap-1"><input type="checkbox" checked={showFilteredItems} onChange={(e) => setShowFilteredItems(e.target.checked)} />マスタ除外項目（レジ袋等）も表示する</label>
                             <p className="font-bold text-bakery-primary text-xl">合計: ￥{calculateTotal().toLocaleString()}</p>
                         </div>
 
                         <div className="bg-white rounded-xl shadow-sm border border-bakery-border overflow-x-auto mb-6">
                             <table className="w-full text-left text-sm border-collapse min-w-max">
-                                <thead>
-                                    <tr className="bg-bakery-bg text-bakery-primary">
-                                        <th className="p-3 border-b border-bakery-border">商品名</th>
-                                        <th className="p-3 border-b border-bakery-border w-24">単価</th>
-                                        <th className="p-3 border-b border-bakery-border w-16">数量</th>
-                                        <th className="p-3 border-b border-bakery-border w-32">カテゴリ</th>
-                                        <th className="p-3 border-b border-bakery-border w-20 text-center">状態</th>
-                                    </tr>
-                                </thead>
+                                <thead className="bg-bakery-bg text-bakery-primary"><tr><th className="p-3 border-b border-bakery-border">商品名</th><th className="p-3 border-b border-bakery-border w-24">単価</th><th className="p-3 border-b border-bakery-border w-16">数量</th><th className="p-3 border-b border-bakery-border w-32">カテゴリ</th><th className="p-3 border-b border-bakery-border w-24 text-center">状態</th><th className="p-3 border-b border-bakery-border w-16 text-center">操作</th></tr></thead>
                                 <tbody>
                                     {items.map((item, idx) => {
                                         if (item.is_filtered && !showFilteredItems) return null;
                                         return (
                                             <tr key={idx} className={`border-b border-gray-100 ${item.is_filtered ? 'bg-red-50' : 'hover:bg-[#FAFAFA]'}`}>
-                                                <td className="p-2"><input type="text" value={item.name} onChange={(e) => handleItemChange(idx, 'name', e.target.value)} className="w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none font-bold text-bakery-textMain" /></td>
-                                                <td className="p-2"><input type="number" value={item.price} onChange={(e) => handleItemChange(idx, 'price', Number(e.target.value))} className="w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none text-right" /></td>
-                                                <td className="p-2"><input type="number" value={item.qty} onChange={(e) => handleItemChange(idx, 'qty', Number(e.target.value))} className="w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none text-center" /></td>
-                                                <td className="p-2">
-                                                    <select value={item.category_id} onChange={(e) => handleItemChange(idx, 'category_id', e.target.value)} className="w-full p-2 border border-transparent hover:border-gray-300 rounded bg-transparent focus:border-bakery-gold outline-none text-xs">
-                                                        {uniqueCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                                                    </select>
-                                                </td>
-                                                <td className="p-2 text-center">{item.is_filtered ? <button onClick={() => handleItemChange(idx, 'is_filtered', false)} className="bg-red-500 text-white px-2 py-1 rounded text-xs shadow-sm">除外中</button> : <span className="text-green-600 font-bold text-xs">✓ 対象</span>}</td>
+                                                <td className="p-2"><input type="text" value={item.name} onChange={(e) => handleItemChange(idx, 'name', e.target.value)} className={`w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none font-bold ${item.is_filtered ? 'text-gray-400' : 'text-bakery-textMain'} bg-transparent`} /></td>
+                                                <td className="p-2"><input type="number" value={item.price} onChange={(e) => handleItemChange(idx, 'price', Number(e.target.value))} className={`w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none text-right bg-transparent ${item.is_filtered ? 'text-gray-400' : ''}`} /></td>
+                                                <td className="p-2"><input type="number" value={item.qty} onChange={(e) => handleItemChange(idx, 'qty', Number(e.target.value))} className={`w-full p-2 border border-transparent hover:border-gray-300 rounded focus:border-bakery-gold outline-none text-center bg-transparent ${item.is_filtered ? 'text-gray-400' : ''}`} /></td>
+                                                <td className="p-2"><select value={item.category_id} onChange={(e) => handleItemChange(idx, 'category_id', e.target.value)} className="w-full p-2 border border-transparent hover:border-gray-300 rounded bg-transparent focus:border-bakery-gold outline-none text-xs">{uniqueCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}</select></td>
+                                                <td className="p-2 text-center">{item.is_filtered ? <button onClick={() => handleItemChange(idx, 'is_filtered', false)} className="bg-red-500 text-white px-2 py-1 rounded text-xs shadow-sm w-full">除外中</button> : <button onClick={() => handleItemChange(idx, 'is_filtered', true)} className="text-green-600 font-bold text-xs hover:bg-green-50 px-2 py-1 rounded transition-colors w-full border border-transparent hover:border-green-200">✓ 対象</button>}</td>
+                                                <td className="p-2 text-center"><button onClick={() => handleDeleteItem(idx)} className="text-gray-400 hover:text-red-500 text-xs px-2 py-1 transition-colors rounded hover:bg-red-50" title="この行を削除">🗑️</button></td>
                                             </tr>
                                         );
                                     })}
@@ -396,25 +599,15 @@ export default function Analyze() {
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                            <button onClick={handleSaveToDB} disabled={isSaving || savedSessionId !== null} className={`py-4 rounded-xl font-bold shadow-md transition-colors ${savedSessionId !== null ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-bakery-gold text-white hover:bg-[#C4A882]'}`}>
-                                {savedSessionId !== null ? '✅ 保存済み' : '💾 修正を確認して売上登録'}
-                            </button>
-
+                            <button onClick={handleSaveToDB} disabled={isSaving || savedSessionId !== null} className={`py-4 rounded-xl font-bold shadow-md transition-colors ${savedSessionId !== null ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-bakery-gold text-white hover:bg-[#C4A882]'}`}>{savedSessionId !== null ? '✅ 保存済み' : '💾 修正を確認して売上登録'}</button>
                             <div className="bg-bakery-surface p-4 rounded-xl border border-bakery-border shadow-inner flex flex-col justify-center">
-                                <select value={selectedCustomerId} onChange={e => setSelectedCustomerId(e.target.value)} className="w-full p-2 border border-bakery-border rounded bg-white mb-2 text-sm font-bold text-[#8B6340] outline-none">
-                                    <option value="">-- 顧客に紐付ける --</option>
-                                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                </select>
-                                <button onClick={handleLinkCustomer} disabled={!selectedCustomerId || isSaving || !savedSessionId} className="w-full py-2 bg-bakery-primary text-white rounded font-bold text-sm disabled:opacity-50 hover:bg-[#8B5E3C]">
-                                    ⭐ お客様の購買履歴として記録
-                                </button>
+                                <select value={selectedCustomerId} onChange={e => setSelectedCustomerId(e.target.value)} className="w-full p-2 border border-bakery-border rounded bg-white mb-2 text-sm font-bold text-[#8B6340] outline-none"><option value="">-- 顧客に紐付ける --</option>{customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                                <button onClick={handleLinkCustomer} disabled={!selectedCustomerId || isSaving || !savedSessionId} className="w-full py-2 bg-bakery-primary text-white rounded font-bold text-sm disabled:opacity-50 hover:bg-[#8B5E3C]">⭐ お客様の購買履歴として記録</button>
                             </div>
                         </div>
 
                         <div className="text-right flex flex-col justify-center">
-                            <button onClick={() => { if (window.confirm("クリアしますか？")) { setItems([]); setSavedSessionId(null); setImageBase64(null); setPreviewUrl(null); } }} className="text-sm text-bakery-danger border border-bakery-danger/30 bg-red-50 px-4 py-3 rounded-lg font-bold shadow-sm hover:bg-red-100 transition-colors w-full h-full">
-                                🗑️ リストをクリアしてやり直す
-                            </button>
+                            <button onClick={() => { if (window.confirm("クリアしますか？")) { setItems([]); setSavedSessionId(null); setImageBase64(null); setPreviewUrl(null); } }} className="text-sm text-bakery-danger border border-bakery-danger/30 bg-red-50 px-4 py-3 rounded-lg font-bold shadow-sm hover:bg-red-100 transition-colors w-full h-full">🗑️ リストをクリアしてやり直す</button>
                         </div>
                     </div>
                 )}
@@ -425,9 +618,7 @@ export default function Analyze() {
                     <div className="bg-white p-8 rounded-2xl text-center max-w-sm w-full shadow-2xl animate-fade-in-up">
                         <h4 className="text-xl font-bold mb-2 text-bakery-textMain">📱 スマホで撮影</h4>
                         <p className="text-sm text-gray-500 mb-6">カメラでQRを読み取り、<br />直接撮影して転送してください</p>
-                        <div className="inline-block p-4 border-2 border-bakery-border rounded-xl bg-bakery-surface mb-6">
-                            <QRCodeSVG value={`${currentUrl}#/mobile`} size={200} />
-                        </div>
+                        <div className="inline-block p-4 border-2 border-bakery-border rounded-xl bg-bakery-surface mb-6"><QRCodeSVG value={currentUrl ? `${currentUrl}#/mobile` : ''} size={200} /></div>
                         <button onClick={() => setShowQrModal(false)} className="w-full py-3 bg-gray-200 text-gray-800 font-bold rounded-xl hover:bg-gray-300">閉じる</button>
                     </div>
                 </div>

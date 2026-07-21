@@ -259,7 +259,7 @@ export default function Dashboard() {
 
                 return (
                   <tr key={p.id} className="hover:bg-gray-50">
-                    <td className="border border-black p-1 truncate max-w-[140px] pl-4 font-bold text-bakery-textMain">└ {p.name}</td>
+                    <td className="border border-black p-1 truncate max-w-35 pl-4 font-bold text-bakery-textMain">└ {p.name}</td>
                     <td className="border border-black p-1 text-right pr-1">{p.price}</td>
                     {daysArray.map(d => { const qty = matrixData[p.name]?.[d] || 0; return <td key={d} className={`border border-black p-0.5 text-right pr-1 ${qty === 0 ? 'text-transparent' : 'font-bold'}`}>{qty > 0 ? qty : ''}</td>; })}
                     <td className="border border-black p-1 text-right pr-1 font-bold text-bakery-primary">{rowTotal}</td>
@@ -296,8 +296,8 @@ export default function Dashboard() {
         <div className="relative" ref={dropdownRef}>
           <div className="flex items-center gap-2">
             <span className="font-bold text-bakery-textMain whitespace-nowrap">🔍 カテゴリ :</span>
-            <button onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)} className="p-2 border border-bakery-border rounded bg-bakery-bg focus:ring-2 focus:ring-bakery-gold min-w-[160px] text-left flex justify-between items-center">
-              <span className="truncate max-w-[120px]">{selectedCategories.length === 0 ? "すべて" : `${selectedCategories.length}件 選択中`}</span><span className="text-xs">▼</span>
+            <button onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)} className="p-2 border border-bakery-border rounded bg-bakery-bg focus:ring-2 focus:ring-bakery-gold min-w-40 text-left flex justify-between items-center">
+              <span className="truncate max-w-30">{selectedCategories.length === 0 ? "すべて" : `${selectedCategories.length}件 選択中`}</span><span className="text-xs">▼</span>
             </button>
           </div>
           {isCategoryDropdownOpen && (
@@ -363,8 +363,8 @@ export default function Dashboard() {
           ) : (
             <div className="space-y-8">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-bakery-border h-[350px] flex flex-col"><h2 className="text-lg font-bold mb-4">💰 売上金額 TOP10</h2><div className="flex-1 min-h-0"><ResponsiveContainer width="100%" height="100%"><BarChart data={filteredRanking.slice(0, 10)} layout="vertical" margin={{ left: 40, right: 20 }}><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F', fontSize: 12 }} /><Tooltip formatter={(v: any) => [`￥${Number(v).toLocaleString()}`, "売上"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} /><Bar dataKey="totalSales" radius={[0, 4, 4, 0]}>{filteredRanking.slice(0, 10).map((_, i) => <Cell key={i} fill="#8B5E3C" />)}</Bar></BarChart></ResponsiveContainer></div></div>
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-bakery-border h-[350px] flex flex-col"><h2 className="text-lg font-bold mb-4">📦 販売個数 TOP10</h2><div className="flex-1 min-h-0"><ResponsiveContainer width="100%" height="100%"><BarChart data={[...filteredRanking].sort((a, b) => b.totalQty - a.totalQty).slice(0, 10)} layout="vertical" margin={{ left: 40, right: 20 }}><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F', fontSize: 12 }} /><Tooltip formatter={(v: any) => [`${Number(v).toLocaleString()} 個`, "個数"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} /><Bar dataKey="totalQty" radius={[0, 4, 4, 0]}>{filteredRanking.slice(0, 10).map((_, i) => <Cell key={i} fill="#D4A96A" />)}</Bar></BarChart></ResponsiveContainer></div></div>
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-bakery-border h-87.5 flex flex-col"><h2 className="text-lg font-bold mb-4">💰 売上金額 TOP10</h2><div className="flex-1 min-h-0"><ResponsiveContainer width="100%" height="100%"><BarChart data={filteredRanking.slice(0, 10)} layout="vertical" margin={{ left: 40, right: 20 }}><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F', fontSize: 12 }} /><Tooltip formatter={(v: any) => [`￥${Number(v).toLocaleString()}`, "売上"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} /><Bar dataKey="totalSales" radius={[0, 4, 4, 0]}>{filteredRanking.slice(0, 10).map((_, i) => <Cell key={i} fill="#8B5E3C" />)}</Bar></BarChart></ResponsiveContainer></div></div>
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-bakery-border h-87.5 flex flex-col"><h2 className="text-lg font-bold mb-4">📦 販売個数 TOP10</h2><div className="flex-1 min-h-0"><ResponsiveContainer width="100%" height="100%"><BarChart data={[...filteredRanking].sort((a, b) => b.totalQty - a.totalQty).slice(0, 10)} layout="vertical" margin={{ left: 40, right: 20 }}><XAxis type="number" hide /><YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#3D2B1F', fontSize: 12 }} /><Tooltip formatter={(v: any) => [`${Number(v).toLocaleString()} 個`, "個数"]} contentStyle={{ backgroundColor: '#FDF0D5', borderColor: '#E0C898', borderRadius: '8px' }} /><Bar dataKey="totalQty" radius={[0, 4, 4, 0]}>{filteredRanking.slice(0, 10).map((_, i) => <Cell key={i} fill="#D4A96A" />)}</Bar></BarChart></ResponsiveContainer></div></div>
               </div>
 
               <div className="bg-white p-6 rounded-xl shadow-sm border border-bakery-border overflow-hidden">
